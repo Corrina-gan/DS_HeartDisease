@@ -16,6 +16,7 @@ from sklearn.metrics import (
 )
 from imblearn.pipeline import Pipeline as ImbPipeline
 from imblearn.over_sampling import SMOTE
+from sklearn.inspection import permutation_importance
 
 from data_preprocessing import run_pipeline, RANDOM_STATE
 
@@ -114,6 +115,40 @@ def tune_and_evaluate(pipeline, param_grid, X_train, X_test, y_train, y_test, mo
 # --------------------------------------------------------------------------
 # Visualizations
 # --------------------------------------------------------------------------
+def get_permutation_importance(model, X_test, y_test):
+    """Calculates permutation importance for models without native feature weights."""
+    result = permutation_importance(model, X_test, y_test, n_repeats=5, random_state=RANDOM_STATE, n_jobs=-1)
+    
+    imp_df = pd.DataFrame({
+        "Feature": X_test.columns,
+        "Importance": result.importances_mean,
+        "Std_Dev": result.importances_std
+    })
+    
+    imp_df = imp_df.sort_values(by="Importance", ascending=False).reset_index(drop=True)
+    imp_df.index += 1
+    imp_df.index.name = "Rank"
+    
+    return imp_df.reset_index()
+
+def plot_permutation_importance(imp_df, title):
+    """Plots the top 15 features based on permutation importance."""
+    fig, ax = plt.subplots(figsize=(8, 6))
+    top_df = imp_df.head(15)
+    
+    sns.barplot(
+        x="Importance", 
+        y="Feature", 
+        data=top_df, 
+        palette="viridis", 
+        ax=ax
+    )
+    
+    ax.set_title(title, fontweight='bold')
+    ax.set_xlabel("Mean Accuracy Decrease (Importance)")
+    ax.set_ylabel("")
+    plt.tight_layout()
+    return fig
 
 def plot_confusion_matrices(all_results, class_labels=("No", "Yes")):
     n = len(all_results)
