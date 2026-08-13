@@ -1,4 +1,3 @@
-
 import os
 import json
 
@@ -22,6 +21,8 @@ from data_preprocessing import run_pipeline, RANDOM_STATE
 
 TEST_SIZE = 0.30
 OUTPUT_DIR = "outputs"
+
+KNN_SCORING = "f1"
 
 BASIC_PARAM_GRID = {
     "knn__n_neighbors": [5, 9, 15],
@@ -79,10 +80,16 @@ def build_smote_pipeline():
 # Tune + evaluate
 # --------------------------------------------------------------------------
 
-def tune_and_evaluate(pipeline, param_grid, X_train, X_test, y_train, y_test, model_name, cv=5):
+def tune_and_evaluate(pipeline, param_grid, X_train, X_test, y_train, y_test, model_name, cv=5, scoring=KNN_SCORING):
     grid = GridSearchCV(
-        pipeline, param_grid, cv=cv, scoring="roc_auc", n_jobs=-1, verbose=1,
+        pipeline,
+        param_grid,
+        cv=cv,
+        scoring=scoring,
+        n_jobs=-1,
+        verbose=1,
     )
+
     grid.fit(X_train, y_train)
     best_model = grid.best_estimator_
 
@@ -93,10 +100,11 @@ def tune_and_evaluate(pipeline, param_grid, X_train, X_test, y_train, y_test, mo
         "Model": model_name,
         "Split": f"{int((1 - TEST_SIZE) * 100)}/{int(TEST_SIZE * 100)}",
         "Best Params": grid.best_params_,
-        "CV ROC-AUC (best)": round(grid.best_score_, 4),
+        "CV Scoring Metric": scoring,
+        f"CV {scoring.upper()} (best)": round(grid.best_score_, 4),
         "Accuracy": round(accuracy_score(y_test, y_pred), 4),
         "Precision": round(precision_score(y_test, y_pred, zero_division=0), 4),
-        "Recall": round(recall_score(y_test, y_pred), 4),
+        "Recall": round(recall_score(y_test, y_pred, zero_division=0), 4),
         "F1-Score": round(f1_score(y_test, y_pred, zero_division=0), 4),
         "ROC-AUC": round(roc_auc_score(y_test, y_prob), 4),
     }
@@ -212,18 +220,20 @@ def run_knn_experiments(path="heart_disease.csv", save_outputs=True, show_plots=
     basic_results = tune_and_evaluate(
         build_basic_pipeline(), BASIC_PARAM_GRID,
         X_train, X_test, y_train, y_test, "1. Basic KNN",
+        scoring=KNN_SCORING,
     )
     print(f"Best Params: {basic_results['metrics']['Best Params']}")
-    print(f"Best CV ROC-AUC: {basic_results['metrics']['CV ROC-AUC (best)']}")
+    print(f"Best CV {KNN_SCORING.upper()}: {basic_results['metrics'][f'CV {KNN_SCORING.upper()} (best)']}")
     print(basic_results["classification_report"])
 
     section("2. SMOTE KNN (70/30 split)")
     smote_results = tune_and_evaluate(
         build_smote_pipeline(), SMOTE_PARAM_GRID,
         X_train, X_test, y_train, y_test, "2. SMOTE KNN",
+        scoring=KNN_SCORING,
     )
     print(f"Best Params: {smote_results['metrics']['Best Params']}")
-    print(f"Best CV ROC-AUC: {smote_results['metrics']['CV ROC-AUC (best)']}")
+    print(f"Best CV {KNN_SCORING.upper()}: {smote_results['metrics'][f'CV {KNN_SCORING.upper()} (best)']}")
     print(smote_results["classification_report"])
 
     all_results = {"1. Basic KNN": basic_results, "2. SMOTE KNN": smote_results}
