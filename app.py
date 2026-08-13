@@ -460,11 +460,11 @@ elif page == "📊 Model Comparison":
         # ==========================================
         st.info(
             "**📝 Executive Summary & Report Conclusion:**\n\n"
-            "While the **Basic KNN** achieves a higher overall Accuracy, "
-            "it struggles to identify patients with heart disease (extremely low Recall). "
-            "Applying **SMOTE** successfully balances the training data, significantly boosting the model's "
-            "Recall for positive cases. In medical diagnostics, minimizing False Negatives is critical, "
-            "making the **SMOTE-tuned KNN** the superior practical model despite the drop in raw accuracy."
+            "Both pipelines were tuned to optimise **F1-Score**. "
+            "While **SMOTE KNN** achieved a drastically higher Recall, it did so by severely over-predicting the positive class, "
+            "causing overall Accuracy to collapse to clinically unusable levels (~38%). "
+            "Therefore, **Basic KNN** is selected as the superior, more stable pipeline for this algorithm, "
+            "with SMOTE provided strictly as an experimental reference to illustrate the extreme cost of the precision-recall trade-off."
         )
 
         st.divider()
@@ -472,21 +472,22 @@ elif page == "📊 Model Comparison":
         # ==========================================
         # 2. HIGH-LEVEL METRICS IMPACT
         # ==========================================
-        st.subheader("📊 High-Level Metrics Impact (SMOTE vs. Basic)")
+        st.subheader("📊 Baseline Metrics (& Impact of SMOTE)")
         
         basic = results_df.iloc[0]
         smote = results_df.iloc[1]
         
         def get_delta(metric):
+            # Calculate the impact: SMOTE minus Basic
             return float(smote[metric] - basic[metric])
 
-        # Large Metric Cards
+        # Large Metric Cards now display BASIC as the main number
         c1, c2, c3, c4, c5 = st.columns(5)
-        c1.metric("Accuracy", f"{smote['Accuracy']:.4f}", f"{get_delta('Accuracy'):.4f}")
-        c2.metric("Precision", f"{smote['Precision']:.4f}", f"{get_delta('Precision'):.4f}")
-        c3.metric("Recall", f"{smote['Recall']:.4f}", f"{get_delta('Recall'):.4f}")
-        c4.metric("F1-Score", f"{smote['F1-Score']:.4f}", f"{get_delta('F1-Score'):.4f}")
-        c5.metric("ROC-AUC", f"{smote['ROC-AUC']:.4f}", f"{get_delta('ROC-AUC'):.4f}")
+        c1.metric("Accuracy", f"{basic['Accuracy']:.4f}", f"{get_delta('Accuracy'):.4f}")
+        c2.metric("Precision", f"{basic['Precision']:.4f}", f"{get_delta('Precision'):.4f}")
+        c3.metric("Recall", f"{basic['Recall']:.4f}", f"{get_delta('Recall'):.4f}")
+        c4.metric("F1-Score", f"{basic['F1-Score']:.4f}", f"{get_delta('F1-Score'):.4f}")
+        c5.metric("ROC-AUC", f"{basic['ROC-AUC']:.4f}", f"{get_delta('ROC-AUC'):.4f}")
 
         st.divider()
 
