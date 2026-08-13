@@ -58,7 +58,7 @@ page = st.sidebar.radio(
 )
 
 # ---------------------------------------------------------------------------
-# Load data + train models (cached -- cheap after first run)
+# Load data + PREFETCH Heavy Computations
 # ---------------------------------------------------------------------------
 
 try:
@@ -81,6 +81,35 @@ results = trained["results"]
 y_test = trained["y_test"]
 results_df = pd.DataFrame([res["metrics"] for res in results.values()])
 
+# --- PREFETCH MAGIC HAPPENS HERE ---
+@st.cache_resource(show_spinner="Prefetching EDA Plots (One-time setup)...")
+def prefetch_eda_plots(df, num_cols, cat_cols):
+    return {
+        "class_dist": dv.plot_class_distribution(df),
+        "num_dist": dv.plot_numeric_distributions(df, num_cols),
+        "qq_plots": dv.plot_qq_plots(df, num_cols),
+        "cat_dist": dv.plot_categorical_distributions(df, cat_cols),
+        "corr_heat": dv.plot_correlation_heatmap(df, num_cols),
+        "outliers": dv.plot_outliers_boxplot(df, num_cols),
+        "num_by_target": dv.plot_numeric_by_target(df, num_cols),
+        "cat_rate": dv.plot_categorical_rate_by_target(df, cat_cols),
+        "cat_counts": dv.plot_categorical_counts_by_target(df, cat_cols),
+        "cat_pct": dv.plot_categorical_percentage_by_target(df, cat_cols)
+    }
+
+@st.cache_resource(show_spinner="Prefetching Data Stats...")
+def prefetch_stats(df, num_cols, cat_cols, X_df, y_ser):
+    outlier_df = dv.compute_outlier_counts(df, num_cols)
+    table_numeric, table_categorical, fig_assoc = dv.test_target_associations(df, num_cols, cat_cols)
+    mcar_df, fig_mcar = dv.test_alcohol_missingness_mcar(df, num_cols, cat_cols)
+    fig_corr, _ = dv.plot_target_correlation_heatmap(pipeline_data["df"], X_df.columns.tolist())
+    anova_df = dv.compute_anova_scores(X_df, y_ser)
+    chi2_df = dv.compute_chi2_scores(X_df, y_ser)
+    return outlier_df, table_numeric, table_categorical, fig_assoc, mcar_df, fig_mcar, fig_corr, anova_df, chi2_df
+
+# Trigger the prefetch immediately!
+eda_figs = prefetch_eda_plots(raw_df, numeric_cols, categorical_cols)
+outlier_df, table_numeric, table_categorical, fig_assoc, mcar_df, fig_mcar, fig_corr, anova_df, chi2_df = prefetch_stats(raw_df, numeric_cols, categorical_cols, X, y)
 
 # =============================================================================
 # PAGE: Overview
@@ -104,40 +133,34 @@ if page == "\U0001F3E0 Overview":
     c1.dataframe(counts)
     c2.bar_chart(counts)
 
-    st.subheader("Best model so far")
-    best_name = results_df.loc[results_df["ROC-AUC"].idxmax(), "Model"]
-    best_auc = results_df["ROC-AUC"].max()
-    st.success(f"**{best_name}** currently has the higher test ROC-AUC ({best_auc:.3f}). See *Model Comparison* for full detail.")
-
 
 # =============================================================================
 # PAGE: EDA
 # =============================================================================
-elif page == "\U0001F50D EDA":
+elif page == "🔍 EDA":
     st.title("Exploratory Data Analysis")
     st.caption("All plots use the raw (uncleaned) dataset.")
 
     st.subheader("Class Distribution")
-    st.pyplot(dv.plot_class_distribution(raw_df))
+    st.pyplot(eda_figs["class_dist"])
 
     st.subheader("Numeric Feature Distributions")
-    st.pyplot(dv.plot_numeric_distributions(raw_df, numeric_cols))
+    st.pyplot(eda_figs["num_dist"])
 
     st.subheader("QQ-Plots (vs. Uniform)")
-    st.pyplot(dv.plot_qq_plots(raw_df, numeric_cols))
+    st.pyplot(eda_figs["qq_plots"])
 
     st.subheader("Categorical Feature Distributions (%)")
-    st.pyplot(dv.plot_categorical_distributions(raw_df, categorical_cols))
+    st.pyplot(eda_figs["cat_dist"])
 
     st.subheader("Correlation Heatmap (numeric features)")
-    st.pyplot(dv.plot_correlation_heatmap(raw_df, numeric_cols))
+    st.pyplot(eda_figs["corr_heat"])
 
-    st.subheader("Outliers (1.5\u00d7 IQR)")
-    st.pyplot(dv.plot_outliers_boxplot(raw_df, numeric_cols))
-    st.dataframe(dv.compute_outlier_counts(raw_df, numeric_cols), width='stretch')
+    st.subheader("Outliers (1.5× IQR)")
+    st.pyplot(eda_figs["outliers"])
+    st.dataframe(outlier_df, width='stretch')
 
     st.subheader("Feature vs Target Associations")
-    table_numeric, table_categorical, fig_assoc = dv.test_target_associations(raw_df, numeric_cols, categorical_cols)
     st.pyplot(fig_assoc)
     colA, colB = st.columns(2)
     colA.markdown("**Numeric (point-biserial r)**")
@@ -146,20 +169,19 @@ elif page == "\U0001F50D EDA":
     colB.dataframe(table_categorical, width='stretch')
 
     st.subheader("Numeric Features by Target")
-    st.pyplot(dv.plot_numeric_by_target(raw_df, numeric_cols))
+    st.pyplot(eda_figs["num_by_target"])
 
     st.subheader("Heart Disease Rate by Category")
-    st.pyplot(dv.plot_categorical_rate_by_target(raw_df, categorical_cols))
+    st.pyplot(eda_figs["cat_rate"])
 
     with st.expander("More: raw counts & normalized % by category"):
-        st.pyplot(dv.plot_categorical_counts_by_target(raw_df, categorical_cols))
-        st.pyplot(dv.plot_categorical_percentage_by_target(raw_df, categorical_cols))
-
+        st.pyplot(eda_figs["cat_counts"])
+        st.pyplot(eda_figs["cat_pct"])
 
 # =============================================================================
 # PAGE: Preprocessing
 # =============================================================================
-elif page == "\U0001F9F9 Preprocessing":
+elif page == "🧹 Preprocessing":
     st.title("Preprocessing")
 
     st.subheader("Missing Values (raw data)")
@@ -171,7 +193,6 @@ elif page == "\U0001F9F9 Preprocessing":
         st.info("No missing values found in the raw data.")
 
     st.subheader("Is 'Alcohol Consumption' missing at random (MCAR)?")
-    mcar_df, fig_mcar = dv.test_alcohol_missingness_mcar(raw_df, numeric_cols, categorical_cols)
     st.pyplot(fig_mcar)
     st.dataframe(mcar_df, width='stretch')
 
@@ -179,67 +200,21 @@ elif page == "\U0001F9F9 Preprocessing":
     display_summary = missing_treatment_summary.copy()
     display_summary["Imputation Value"] = display_summary["Imputation Value"].astype(str)
     st.dataframe(display_summary, width='stretch')
-    st.caption(
-        "Alcohol Consumption is kept as its own 'Unknown' category (MCAR, too much missing "
-        "to safely impute). Everything else uses median (numeric) / mode (categorical) imputation."
-    )
+    st.caption("Alcohol Consumption is kept as its own 'Unknown' category (MCAR).")
 
     st.subheader("Encoding")
-    st.markdown(
-        "- **Ordinal** (`Exercise Habits`, `Stress Level`, `Sugar Consumption`, `Alcohol Consumption`) "
-        "\u2192 integer-mapped, preserving order.\n"
-        "- **Binary / nominal** (Gender, Smoking, Family Heart Disease, Diabetes, "
-        "High Blood Pressure, Low/High Cholesterol) \u2192 one-hot encoded, so KNN's distance metric "
-        "doesn't read a false rank order into them.\n"
-        f"- **Target** (`{dp.TARGET_COL}`) \u2192 label-encoded: `{target_mapping}`"
-    )
-    st.write(f"Final feature matrix: **{X.shape[0]} rows \u00d7 {X.shape[1]} columns**")
+    st.markdown("- **Ordinal:** integer-mapped.\n- **Binary / nominal:** one-hot encoded.\n" f"- **Target** (`{dp.TARGET_COL}`) → label-encoded: `{target_mapping}`")
+    st.write(f"Final feature matrix: **{X.shape[0]} rows × {X.shape[1]} columns**")
     st.dataframe(X.head(10), width='stretch')
 
     st.subheader("Feature-Target Diagnostics (post-encoding)")
-    fig_corr, target_corr = dv.plot_target_correlation_heatmap(pipeline_data["df"], X.columns.tolist())
     st.pyplot(fig_corr)
 
-    anova_df = dv.compute_anova_scores(X, y)
-    chi2_df = dv.compute_chi2_scores(X, y)
     colA, colB = st.columns(2)
     colA.markdown("**ANOVA F-scores**")
     colA.dataframe(anova_df, width='stretch')
     colB.markdown("**Chi-Square scores**")
     colB.dataframe(chi2_df, width='stretch')
-
-
-# =============================================================================
-# PAGE: Model Comparison
-# =============================================================================
-elif page == "\U0001F4CA Model Comparison":
-    st.title("Model Comparison \u2014 Basic KNN vs SMOTE KNN")
-    st.caption("Both tuned with 5-fold GridSearchCV (scoring = roc_auc) on the same 70/30 stratified split.")
-
-    st.dataframe(results_df.drop(columns=["Best Params"]), width='stretch')
-
-    tabs = st.tabs(list(results.keys()))
-    for tab, name in zip(tabs, results.keys()):
-        with tab:
-            res = results[name]
-            st.write(f"**Best Params:** `{res['metrics']['Best Params']}`")
-            c1, c2, c3, c4, c5 = st.columns(5)
-            c1.metric("Accuracy", res["metrics"]["Accuracy"])
-            c2.metric("Precision", res["metrics"]["Precision"])
-            c3.metric("Recall", res["metrics"]["Recall"])
-            c4.metric("F1-Score", res["metrics"]["F1-Score"])
-            c5.metric("ROC-AUC", res["metrics"]["ROC-AUC"])
-            st.text(res["classification_report"])
-
-    st.subheader("Confusion Matrices")
-    st.pyplot(km.plot_confusion_matrices(results))
-
-    st.subheader("ROC Curves")
-    st.pyplot(km.plot_roc_curves(results, y_test))
-
-    st.subheader("Metric Comparison")
-    st.pyplot(km.plot_metric_comparison(results_df))
-
 
 # =============================================================================
 # PAGE: Predict
@@ -288,3 +263,172 @@ elif page == "\U0001F52E Predict":
         st.caption(
             f"Model: {model_choice} \u2014 Best Params: `{results[model_choice]['metrics']['Best Params']}`"
         )
+# =============================================================================
+# PAGE: Model Comparison
+# =============================================================================
+elif page == "📊 Model Comparison":
+    st.title("Model Comparison")
+    st.caption("Evaluate and compare the performance of different models on the 70/30 split.")
+
+    model_tabs = st.tabs(["K-Nearest Neighbors (KNN)", "Logistic Regression", "Random Forest", "Decision Tree"])
+
+    # -------------------------------------------------------------------------
+    # TAB 1: KNN (Active Focus)
+    # -------------------------------------------------------------------------
+    with model_tabs[0]:
+        st.header("K-Nearest Neighbors (KNN)")
+
+        # ==========================================
+        # 1. THE METRICS SHOWDOWN
+        # ==========================================
+        st.subheader("📊 Performance Metrics Comparison")
+        
+        # Color-coded table highlighting the best scores
+        metrics_df = results_df.drop(columns=["Best Params", "CV ROC-AUC (best)"]).set_index("Model")
+        
+        # Define the columns that actually need math formatting
+        score_cols = ["Accuracy", "Precision", "Recall", "F1-Score", "ROC-AUC"]
+        
+        styled_df = metrics_df.style.highlight_max(
+            subset=score_cols, 
+            color="#d4edda", 
+            axis=0
+        ).format("{:.4f}", subset=score_cols) # Added subset here!
+        
+        st.dataframe(styled_df, use_container_width=True)
+
+        st.markdown("### 🏆 SMOTE vs. Basic Impact")
+        
+        # Calculate the delta between SMOTE and Basic
+        basic = results_df.iloc[0]
+        smote = results_df.iloc[1]
+        
+        def get_delta(metric):
+            return float(smote[metric] - basic[metric])
+
+        # Large Metric Cards
+        c1, c2, c3, c4, c5 = st.columns(5)
+        c1.metric(label="Accuracy (SMOTE)", value=f"{smote['Accuracy']:.4f}", delta=f"{get_delta('Accuracy'):.4f}")
+        c2.metric(label="Precision (SMOTE)", value=f"{smote['Precision']:.4f}", delta=f"{get_delta('Precision'):.4f}")
+        c3.metric(label="Recall (SMOTE)", value=f"{smote['Recall']:.4f}", delta=f"{get_delta('Recall'):.4f}")
+        c4.metric(label="F1-Score (SMOTE)", value=f"{smote['F1-Score']:.4f}", delta=f"{get_delta('F1-Score'):.4f}")
+        c5.metric(label="ROC-AUC (SMOTE)", value=f"{smote['ROC-AUC']:.4f}", delta=f"{get_delta('ROC-AUC'):.4f}")
+
+        # ==========================================
+        # 2. VISUALIZATIONS
+        # ==========================================
+        st.divider()
+        st.subheader("📈 Visual Evaluation")
+        
+        # Full-width bar chart
+        st.markdown("**Metric Comparison Bar Chart**")
+        st.pyplot(km.plot_metric_comparison(results_df))
+
+        st.divider()
+
+        # Let the Confusion Matrices take up the full width so they are big and readable
+        st.markdown("**Confusion Matrices**")
+        st.pyplot(km.plot_confusion_matrices(results))
+        
+        st.divider()
+
+        # Put the ROC Curves right below it (also full width)
+        st.markdown("**ROC Curves**")
+        # To keep the ROC curve from becoming too massive, we can place it in a centered container
+        roc_col1, roc_col2, roc_col3 = st.columns([1, 2, 1])
+        with roc_col2:
+            st.pyplot(km.plot_roc_curves(results, y_test))
+
+# ==========================================
+        # 3. DETAILED MODEL REPORTS (SIDE-BY-SIDE)
+        # ==========================================
+        st.divider()
+        st.subheader("🔍 Detailed Model Reports (Side-by-Side)")
+        st.write("Compare the exact parameters and class-by-class performance directly.")
+        
+        # Create two columns for a direct half-and-half comparison
+        col_basic, col_smote = st.columns(2)
+        
+        models_list = list(results.keys()) # ["1. Basic KNN", "2. SMOTE KNN"]
+        
+        # --- LEFT COLUMN: BASIC KNN ---
+        with col_basic:
+            res_basic = results[models_list[0]]
+            st.markdown(f"### 🔵 {models_list[0]}")
+            
+            st.markdown("**Best Hyperparameters:**")
+            params_basic_df = pd.DataFrame([res_basic['metrics']['Best Params']]).T
+            params_basic_df.columns = ["Value"]
+            st.dataframe(params_basic_df, use_container_width=True)
+            
+            # Highlight Overall Metrics cleanly outside the table
+            st.info(f"**🎯 Overall Accuracy:** {res_basic['metrics']['Accuracy']:.2%} &nbsp; | &nbsp; **📈 ROC-AUC:** {res_basic['metrics']['ROC-AUC']:.2%}")
+            
+            st.markdown("**Class-by-Class Breakdown:**")
+            report_basic = km.classification_report(y_test, res_basic["y_pred"], output_dict=True, zero_division=0)
+            df_rep_basic = pd.DataFrame(report_basic).transpose()
+            
+            # Rename rows for report clarity and drop the messy 'accuracy' and 'support' rows/columns
+            df_rep_basic.rename(index={'0': 'No Disease (0)', '1': 'Disease (1)', 'macro avg': 'Macro Avg', 'weighted avg': 'Weighted Avg'}, inplace=True)
+            df_rep_basic = df_rep_basic.drop(index=['accuracy'], errors='ignore').drop(columns=['support'], errors='ignore')
+            
+            styled_rep_basic = df_rep_basic.style.background_gradient(cmap='Blues').format("{:.3f}")
+            st.dataframe(styled_rep_basic, use_container_width=True)
+
+        # --- RIGHT COLUMN: SMOTE KNN ---
+        with col_smote:
+            res_smote = results[models_list[1]]
+            st.markdown(f"### 🟢 {models_list[1]}")
+            
+            st.markdown("**Best Hyperparameters:**")
+            params_smote_df = pd.DataFrame([res_smote['metrics']['Best Params']]).T
+            params_smote_df.columns = ["Value"]
+            st.dataframe(params_smote_df, use_container_width=True)
+            
+            # Highlight Overall Metrics cleanly outside the table
+            st.success(f"**🎯 Overall Accuracy:** {res_smote['metrics']['Accuracy']:.2%} &nbsp; | &nbsp; **📈 ROC-AUC:** {res_smote['metrics']['ROC-AUC']:.2%}")
+            
+            st.markdown("**Class-by-Class Breakdown:**")
+            report_smote = km.classification_report(y_test, res_smote["y_pred"], output_dict=True, zero_division=0)
+            df_rep_smote = pd.DataFrame(report_smote).transpose()
+            
+            # Rename rows for report clarity and drop the messy 'accuracy' and 'support' rows/columns
+            df_rep_smote.rename(index={'0': 'No Disease (0)', '1': 'Disease (1)', 'macro avg': 'Macro Avg', 'weighted avg': 'Weighted Avg'}, inplace=True)
+            df_rep_smote = df_rep_smote.drop(index=['accuracy'], errors='ignore').drop(columns=['support'], errors='ignore')
+            
+            styled_rep_smote = df_rep_smote.style.background_gradient(cmap='Greens').format("{:.3f}")
+            st.dataframe(styled_rep_smote, use_container_width=True)
+
+        # ==========================================
+        # 4. REPORT CONCLUSION SUMMARY
+        # ==========================================
+        st.divider()
+        st.subheader("📝 Report Conclusion")
+        st.info(
+            "**Key Finding:** While the Basic KNN achieves higher overall Accuracy, "
+            "it fails to reliably identify patients who actually have heart disease (low Recall). "
+            "Applying SMOTE successfully balances the training data, significantly boosting the model's "
+            "ability to detect true positive cases (Recall). In a medical diagnostic context, minimizing "
+            "False Negatives via higher Recall is critical, making the SMOTE-tuned KNN the superior practical model."
+        )
+
+    # -------------------------------------------------------------------------
+    # TAB 2: Logistic Regression (Placeholder)
+    # -------------------------------------------------------------------------
+    with model_tabs[1]:
+        st.header("Logistic Regression")
+        st.info("Space reserved for Basic vs. SMOTE Logistic Regression. \n\n**(Major Strength: Interpretability and Baseline Benchmarking)**")
+
+    # -------------------------------------------------------------------------
+    # TAB 3: Random Forest (Placeholder)
+    # -------------------------------------------------------------------------
+    with model_tabs[2]:
+        st.header("Random Forest")
+        st.info("Space reserved for Basic vs. SMOTE Random Forest. \n\n**(Major Strength: Pure Predictive Power and Feature Importance)**")
+
+    # -------------------------------------------------------------------------
+    # TAB 4: Decision Tree (Placeholder)
+    # -------------------------------------------------------------------------
+    with model_tabs[3]:
+        st.header("Decision Tree")
+        st.info("Space reserved for Basic vs. SMOTE Decision Tree. \n\n**(Major Strength: Human-Readable Logic and Non-Linearity)**")
