@@ -21,9 +21,9 @@ ORDINAL_MAPS = {
 def load_data(path="heart_disease.csv"):
     df = pd.read_csv(path)
 
-    str_cols = df.select_dtypes(include="object").columns.tolist()
+    str_cols = df.select_dtypes(include=["object", "string"]).columns.tolist()
     for c in str_cols:
-        df[c] = df[c].astype(str).str.strip().replace("nan", pd.NA)
+        df[c] = df[c].astype(str).str.strip().replace("nan", np.nan)
 
     df = df.drop_duplicates()
     return df
@@ -36,11 +36,6 @@ def get_column_groups(df, target_col=TARGET_COL):
 
 
 def handle_missing_values(df, numeric_cols, categorical_cols, alcohol_col=ALCOHOL_COL):
-    """Alcohol Consumption is missing completely at random (MCAR) at ~26% --
-    too much to mode-impute without flattening real variance, so it's kept
-    as its own explicit category instead. Everything else is imputed
-    (median for numeric, mode for the remaining categoricals).
-    """
     df = df.copy()
     missing_before = df.isnull().sum()
     remaining_cat_cols = [c for c in categorical_cols if c != alcohol_col]
@@ -74,9 +69,6 @@ def handle_missing_values(df, numeric_cols, categorical_cols, alcohol_col=ALCOHO
 
 
 def encode_features(df, categorical_cols, target_col=TARGET_COL, ordinal_maps=None, verbose=True):
-    """Ordinal columns get an integer mapping that preserves order; the
-    remaining binary/nominal columns and the target get label-encoded.
-    """
     df = df.copy()
     ordinal_maps = ordinal_maps or ORDINAL_MAPS
 
@@ -84,11 +76,11 @@ def encode_features(df, categorical_cols, target_col=TARGET_COL, ordinal_maps=No
         df[col] = df[col].map(mapping)
 
     binary_cols = [c for c in categorical_cols if c not in ordinal_maps]
-    for col in binary_cols:
-        le_col = LabelEncoder()
-        df[col] = le_col.fit_transform(df[col])
-        if verbose:
-            print(col, "->", dict(zip(le_col.classes_, le_col.transform(le_col.classes_))))
+    df = pd.get_dummies(df, columns=binary_cols, drop_first=False)
+    new_dummy_cols = [c for c in df.columns if any(c.startswith(b + "_") for b in binary_cols)]
+    df[new_dummy_cols] = df[new_dummy_cols].astype(int)
+    if verbose:
+        print("New columns added:", new_dummy_cols)
 
     le_target = LabelEncoder()
     df["target"] = le_target.fit_transform(df[target_col])
@@ -101,6 +93,21 @@ def encode_features(df, categorical_cols, target_col=TARGET_COL, ordinal_maps=No
     assert X.isnull().sum().sum() == 0
 
     return df, X, y, le_target
+
+
+def build_single_row_features(raw_input, categorical_cols, reference_columns, ordinal_maps=None):
+    ordinal_maps = ordinal_maps or ORDINAL_MAPS
+    row = pd.DataFrame([raw_input])
+
+    for col, mapping in ordinal_maps.items():
+        if col in row.columns:
+            row[col] = row[col].map(mapping)
+
+    binary_cols = [c for c in categorical_cols if c not in ordinal_maps and c in row.columns]
+    row = pd.get_dummies(row, columns=binary_cols, drop_first=False)
+
+    row = row.reindex(columns=reference_columns, fill_value=0)
+    return row
 
 
 def split_and_scale(X, y, test_size=0.20, random_state=RANDOM_STATE):
