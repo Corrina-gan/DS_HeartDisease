@@ -119,6 +119,7 @@ target_mapping = dict(zip(le_target.classes_, le_target.transform(le_target.clas
 
 trained = train_models(X, y)
 results = trained["results"]
+X_test = trained["X_test"] 
 y_test = trained["y_test"]
 results_df = pd.DataFrame([res["metrics"] for res in results.values()])
 
@@ -552,6 +553,38 @@ elif page == "📊 Model Comparison":
             # Hide hyperparameters in a neat dropdown
             with st.expander("⚙️ View SMOTE Hyperparameters"):
                 st.json(res_smote['metrics']['Best Params'])
+    
+        # ==========================================
+        # 5. FEATURE IMPORTANCE (Permutation)
+        # ==========================================
+        st.divider()
+        st.subheader("🧭 Feature Importance (Permutation)")
+        
+        perm_tab_basic, perm_tab_smote = st.tabs([f"🔵 {models_list[0]}", f"🟢 {models_list[1]}"])
+
+        with perm_tab_basic:
+            imp_df_basic = km.get_permutation_importance(res_basic["best_model"], X_test, y_test)
+            perm_col1, perm_col2 = st.columns([1.3, 1])
+            with perm_col1:
+                st.pyplot(km.plot_permutation_importance(imp_df_basic, "Basic KNN -- Top 15 Features"))
+            with perm_col2:
+                st.dataframe(
+                    imp_df_basic[["Rank", "Feature", "Importance"]].style.format({"Importance": "{:.4f}"}),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+        with perm_tab_smote:
+            imp_df_smote = km.get_permutation_importance(res_smote["best_model"], X_test, y_test)
+            perm_col3, perm_col4 = st.columns([1.3, 1])
+            with perm_col3:
+                st.pyplot(km.plot_permutation_importance(imp_df_smote, "SMOTE KNN -- Top 15 Features"))
+            with perm_col4:
+                st.dataframe(
+                    imp_df_smote[["Rank", "Feature", "Importance"]].style.format({"Importance": "{:.4f}"}),
+                    use_container_width=True,
+                    hide_index=True,
+                )   
 
     # -------------------------------------------------------------------------
     # TAB 2: Logistic Regression (Placeholder)
