@@ -6,6 +6,7 @@ import data_preprocessing as dp
 import data_visualization as dv
 import plotly.graph_objects as go
 import knn as km
+import decision_tree as dtm
 import logistic_regression as lgm
 
 st.set_page_config(page_title="Heart Disease Risk", layout="wide", page_icon="\u2764\ufe0f")
@@ -43,6 +44,23 @@ def train_models(X, y):
     return {
         "X_train": X_train, "X_test": X_test, "y_train": y_train, "y_test": y_test,
         "results": {"1. Basic KNN": basic, "2. SMOTE KNN": smote},
+    }
+
+
+@st.cache_resource(show_spinner="Training Basic & SMOTE Decision Tree (grid search, one-time)...")
+def train_decision_trees(X, y):
+    X_train, X_test, y_train, y_test = dtm.get_70_30_split(X, y)
+    basic = dtm.tune_and_evaluate(
+        dtm.build_basic_pipeline(), dtm.BASIC_PARAM_GRID,
+        X_train, X_test, y_train, y_test, "1. Basic Decision Tree",
+    )
+    smote = dtm.tune_and_evaluate(
+        dtm.build_smote_pipeline(), dtm.SMOTE_PARAM_GRID,
+        X_train, X_test, y_train, y_test, "2. SMOTE Decision Tree",
+    )
+    return {
+        "X_train": X_train, "X_test": X_test, "y_train": y_train, "y_test": y_test,
+        "results": {"1. Basic Decision Tree": basic, "2. SMOTE Decision Tree": smote},
     }
 
 
@@ -141,6 +159,12 @@ X_test = trained["X_test"]
 y_test = trained["y_test"]
 results_df = pd.DataFrame([res["metrics"] for res in results.values()])
 
+dt_trained = train_decision_trees(X, y)
+dt_results = dt_trained["results"]
+dt_X_test = dt_trained["X_test"]
+dt_y_test = dt_trained["y_test"]
+dt_results_df = pd.DataFrame([res["metrics"] for res in dt_results.values()])
+
 trained_lr = train_logreg_models(X, y)
 results_lr = trained_lr["results"]
 y_test_lr = trained_lr["y_test"]
@@ -148,8 +172,8 @@ results_df_lr = pd.DataFrame([res["metrics"] for res in results_lr.values()])
 
 # Combined view across all trained model families, used by the Home predictor
 # and the dataset overview so they reflect the current best model overall.
-all_results = {**results, **results_lr}
-all_results_df = pd.concat([results_df, results_df_lr], ignore_index=True)
+all_results = {**results, **results_lr, **dt_results}
+all_results_df = pd.concat([results_df, results_df_lr, dt_results_df], ignore_index=True)
 
 # --- PREFETCH MAGIC HAPPENS HERE ---
 @st.cache_resource(show_spinner="Prefetching EDA Plots (One-time setup)...")
@@ -763,4 +787,137 @@ elif page == "📊 Model Comparison":
     # -------------------------------------------------------------------------
     with model_tabs[3]:
         st.header("Decision Tree")
-        st.info("Space reserved for Basic vs. SMOTE Decision Tree. \n\n**(Major Strength: Human-Readable Logic and Non-Linearity)**")
+
+        dt_basic = dt_results_df.iloc[0]
+        dt_smote = dt_results_df.iloc[1]
+
+        # ==========================================
+        # 1. EXECUTIVE SUMMARY
+        # ==========================================
+        st.info(
+            "**📝 Executive Summary & Report Conclusion:**\n\n"
+            f"The **Basic Decision Tree** reaches "
+            f"**{dt_basic['Accuracy']:.1%}** accuracy simply by predicting nearly everyone is healthy but giving a very low Recall of only **{dt_basic['Recall']:.1%}**. This "
+            "means almost every patient is classified as *No Disease*, making it useless as a medical diagnostic tool.\n\n"
+            f"Using **SMOTE** helps the model handle the imbalanced data better. Recall increases to **{dt_smote['Recall']:.1%}** "
+            f"({dt_smote['Recall'] - dt_basic['Recall']:+.1%}), while ROC-AUC is **{dt_smote['ROC-AUC']:.3f}** "
+            f"({dt_smote['ROC-AUC'] - dt_basic['ROC-AUC']:+.3f}). However, accuracy decreases to **{dt_smote['Accuracy']:.1%}**.\n\n"
+            "**Conclusion:** For medical screening, finding patients with heart disease is more important than having high accuracy, "
+            "so the **SMOTE-tuned Decision Tree** is the recommended pipeline for this algorithm. The Basic "
+            "tree is retained only as a baseline that demonstrates how misleading raw accuracy becomes "
+            "under class imbalance."
+        )
+
+        st.divider()
+
+        # ==========================================
+        # 2. HIGH-LEVEL METRICS IMPACT
+        # ==========================================
+        st.subheader("📊 High-Level Metrics Impact : SMOTE vs. Basic")
+
+        def get_dt_delta(metric):
+            return float(dt_smote[metric] - dt_basic[metric])
+
+        d1, d2, d3, d4, d5 = st.columns(5)
+        d1.metric("Accuracy", f"{dt_smote['Accuracy']:.4f}", f"{get_dt_delta('Accuracy'):.4f}")
+        d2.metric("Precision", f"{dt_smote['Precision']:.4f}", f"{get_dt_delta('Precision'):.4f}")
+        d3.metric("Recall", f"{dt_smote['Recall']:.4f}", f"{get_dt_delta('Recall'):.4f}")
+        d4.metric("F1-Score", f"{dt_smote['F1-Score']:.4f}", f"{get_dt_delta('F1-Score'):.4f}")
+        d5.metric("ROC-AUC", f"{dt_smote['ROC-AUC']:.4f}", f"{get_dt_delta('ROC-AUC'):.4f}")
+
+        st.divider()
+
+        # ==========================================
+        # 3. VISUAL EVALUATION
+        # ==========================================
+        st.subheader("📈 Visual Evaluation")
+        st.write("Navigate through the tabs below to explore the model visualizations.")
+
+        dt_tab1, dt_tab2, dt_tab3 = st.tabs(["📊 Metric Comparison", "🟦 Confusion Matrices", "📉 ROC Curves"])
+
+        with dt_tab1:
+            st.pyplot(dtm.plot_metric_comparison(dt_results_df))
+
+        with dt_tab2:
+            st.pyplot(dtm.plot_confusion_matrices(dt_results))
+
+        with dt_tab3:
+            dt_roc1, dt_roc2, dt_roc3 = st.columns([1, 2, 1])
+            with dt_roc2:
+                st.pyplot(dtm.plot_roc_curves(dt_results, dt_y_test))
+
+        st.divider()
+
+        # ==========================================
+        # 4. DETAILED CLASS BREAKDOWN
+        # ==========================================
+        st.subheader("🔍 Class-by-Class Breakdown")
+
+        dt_col_basic, dt_col_smote = st.columns(2)
+        dt_models_list = list(dt_results.keys())
+
+        # --- LEFT COLUMN: BASIC DECISION TREE ---
+        with dt_col_basic:
+            dt_res_basic = dt_results[dt_models_list[0]]
+            st.markdown(f"### 🔵 {dt_models_list[0]}")
+            st.info(f"**🎯 Overall Accuracy:** {dt_res_basic['metrics']['Accuracy']:.2%} &nbsp; | &nbsp; **📈 ROC-AUC:** {dt_res_basic['metrics']['ROC-AUC']:.2%}")
+
+            dt_report_basic = dtm.classification_report(dt_y_test, dt_res_basic["y_pred"], output_dict=True, zero_division=0)
+            dt_df_rep_basic = pd.DataFrame(dt_report_basic).transpose()
+            dt_df_rep_basic.rename(index={'0': 'No Disease (0)', '1': 'Disease (1)', 'macro avg': 'Macro Avg', 'weighted avg': 'Weighted Avg'}, inplace=True)
+            dt_df_rep_basic = dt_df_rep_basic.drop(index=['accuracy'], errors='ignore').drop(columns=['support'], errors='ignore')
+
+            st.dataframe(dt_df_rep_basic.style.background_gradient(cmap='Blues').format("{:.3f}"), use_container_width=True)
+
+            with st.expander("⚙️ View Basic Hyperparameters"):
+                st.json(dt_res_basic['metrics']['Best Params'])
+
+        # --- RIGHT COLUMN: SMOTE DECISION TREE ---
+        with dt_col_smote:
+            dt_res_smote = dt_results[dt_models_list[1]]
+            st.markdown(f"### 🟢 {dt_models_list[1]}")
+            st.success(f"**🎯 Overall Accuracy:** {dt_res_smote['metrics']['Accuracy']:.2%} &nbsp; | &nbsp; **📈 ROC-AUC:** {dt_res_smote['metrics']['ROC-AUC']:.2%}")
+
+            dt_report_smote = dtm.classification_report(dt_y_test, dt_res_smote["y_pred"], output_dict=True, zero_division=0)
+            dt_df_rep_smote = pd.DataFrame(dt_report_smote).transpose()
+            dt_df_rep_smote.rename(index={'0': 'No Disease (0)', '1': 'Disease (1)', 'macro avg': 'Macro Avg', 'weighted avg': 'Weighted Avg'}, inplace=True)
+            dt_df_rep_smote = dt_df_rep_smote.drop(index=['accuracy'], errors='ignore').drop(columns=['support'], errors='ignore')
+
+            st.dataframe(dt_df_rep_smote.style.background_gradient(cmap='Greens').format("{:.3f}"), use_container_width=True)
+
+            with st.expander("⚙️ View SMOTE Hyperparameters"):
+                st.json(dt_res_smote['metrics']['Best Params'])
+
+        # ==========================================
+        # 5. FEATURE IMPORTANCE (Permutation)
+        # ==========================================
+        st.divider()
+        st.subheader("🧭 Permutation Feature Importance")
+        st.write("Permutation importance measures how much each feature contributes to the model's predictive performance. "
+                 "A higher importance score indicates that the feature is more influential in determining the model's predictions.")
+
+        dt_perm_basic, dt_perm_smote = st.tabs([f"🔵 {dt_models_list[0]}", f"🟢 {dt_models_list[1]}"])
+
+        with dt_perm_basic:
+            dt_imp_basic = dtm.get_permutation_importance(dt_res_basic["best_model"], dt_X_test, dt_y_test)
+            dt_perm_col1, dt_perm_col2 = st.columns([1.3, 1])
+            with dt_perm_col1:
+                st.pyplot(dtm.plot_permutation_importance(dt_imp_basic, "Basic Decision Tree -- All Features"))
+            with dt_perm_col2:
+                st.dataframe(
+                    dt_imp_basic[["Rank", "Feature", "Importance"]].style.format({"Importance": "{:.4f}"}),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+        with dt_perm_smote:
+            dt_imp_smote = dtm.get_permutation_importance(dt_res_smote["best_model"], dt_X_test, dt_y_test)
+            dt_perm_col3, dt_perm_col4 = st.columns([1.3, 1])
+            with dt_perm_col3:
+                st.pyplot(dtm.plot_permutation_importance(dt_imp_smote, "SMOTE Decision Tree -- All Features"))
+            with dt_perm_col4:
+                st.dataframe(
+                    dt_imp_smote[["Rank", "Feature", "Importance"]].style.format({"Importance": "{:.4f}"}),
+                    use_container_width=True,
+                    hide_index=True,
+                )
