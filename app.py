@@ -6,6 +6,7 @@ import data_preprocessing as dp
 import data_visualization as dv
 import plotly.graph_objects as go
 import knn as km
+import logistic_regression as lgm
 
 st.set_page_config(page_title="Heart Disease Risk", layout="wide", page_icon="\u2764\ufe0f")
 
@@ -42,6 +43,23 @@ def train_models(X, y):
     return {
         "X_train": X_train, "X_test": X_test, "y_train": y_train, "y_test": y_test,
         "results": {"1. Basic KNN": basic, "2. SMOTE KNN": smote},
+    }
+
+
+@st.cache_resource(show_spinner="Training Basic & SMOTE Logistic Regression (grid search, one-time)...")
+def train_logreg_models(X, y):
+    X_train, X_test, y_train, y_test = lgm.get_70_30_split(X, y)
+    basic = lgm.tune_and_evaluate(
+        lgm.build_basic_pipeline(), lgm.BASIC_PARAM_GRID,
+        X_train, X_test, y_train, y_test, "1. Basic Logistic Regression",
+    )
+    smote = lgm.tune_and_evaluate(
+        lgm.build_smote_pipeline(), lgm.SMOTE_PARAM_GRID,
+        X_train, X_test, y_train, y_test, "2. SMOTE Logistic Regression",
+    )
+    return {
+        "X_train": X_train, "X_test": X_test, "y_train": y_train, "y_test": y_test,
+        "results": {"1. Basic Logistic Regression": basic, "2. SMOTE Logistic Regression": smote},
     }
 
 
@@ -123,6 +141,16 @@ X_test = trained["X_test"]
 y_test = trained["y_test"]
 results_df = pd.DataFrame([res["metrics"] for res in results.values()])
 
+trained_lr = train_logreg_models(X, y)
+results_lr = trained_lr["results"]
+y_test_lr = trained_lr["y_test"]
+results_df_lr = pd.DataFrame([res["metrics"] for res in results_lr.values()])
+
+# Combined view across all trained model families, used by the Home predictor
+# and the dataset overview so they reflect the current best model overall.
+all_results = {**results, **results_lr}
+all_results_df = pd.concat([results_df, results_df_lr], ignore_index=True)
+
 # --- PREFETCH MAGIC HAPPENS HERE ---
 @st.cache_resource(show_spinner="Prefetching EDA Plots (One-time setup)...")
 def prefetch_eda_plots(df, num_cols, cat_cols):
@@ -165,8 +193,8 @@ if page == "🏠 Home (Predict & Overview)":
     # -------------------------------------------------------------------------
     st.header("🩺 Live Risk Predictor")
 
-    model_choice = st.selectbox("Select Diagnostic Model:", list(results.keys()))
-    best_model = results[model_choice]["best_model"]
+    model_choice = st.selectbox("Select Diagnostic Model:", list(all_results.keys()))
+    best_model = all_results[model_choice]["best_model"]
 
     with st.form("predict_form"):
         st.subheader("Patient Vitals & Diagnostics")
@@ -244,7 +272,7 @@ if page == "🏠 Home (Predict & Overview)":
         with g_col2:
             st.plotly_chart(fig_gauge, use_container_width=True)
 
-        st.write(f"<div style='text-align: center; color: #888;'>Powered by: {model_choice} | Best Params: {results[model_choice]['metrics']['Best Params']}</div>", unsafe_allow_html=True)
+        st.write(f"<div style='text-align: center; color: #888;'>Powered by: {model_choice} | Best Params: {all_results[model_choice]['metrics']['Best Params']}</div>", unsafe_allow_html=True)
 
     # -------------------------------------------------------------------------
     # SECTION 2: DATASET OVERVIEW
@@ -269,8 +297,8 @@ if page == "🏠 Home (Predict & Overview)":
 
     with overview_col2:
         st.markdown("**Current Top Performing Model**")
-        best_name = results_df.loc[results_df["ROC-AUC"].idxmax(), "Model"]
-        best_auc = results_df["ROC-AUC"].max()
+        best_name = all_results_df.loc[all_results_df["ROC-AUC"].idxmax(), "Model"]
+        best_auc = all_results_df["ROC-AUC"].max()
         st.info(f"🏆 **{best_name}** currently leads with a test ROC-AUC of **{best_auc:.3f}**.")
         
         # Tidy up the UI by hiding the raw data inside an expander
@@ -588,11 +616,140 @@ elif page == "📊 Model Comparison":
                 )   
 
     # -------------------------------------------------------------------------
-    # TAB 2: Logistic Regression (Placeholder)
+    # TAB 2: Logistic Regression
     # -------------------------------------------------------------------------
     with model_tabs[1]:
         st.header("Logistic Regression")
-        st.info("Space reserved for Basic vs. SMOTE Logistic Regression. \n\n**(Major Strength: Interpretability and Baseline Benchmarking)**")
+
+        # ==========================================
+        # 1. EXECUTIVE SUMMARY
+        # ==========================================
+        lr_basic_row = results_df_lr.iloc[0]
+        lr_smote_row = results_df_lr.iloc[1]
+        recall_gain = float(lr_smote_row["Recall"] - lr_basic_row["Recall"])
+        st.info(
+            "**📝 Executive Summary & Report Conclusion:**\n\n"
+            "Logistic Regression provides a fully interpretable baseline: each feature gets a signed "
+            "coefficient showing exactly how it moves risk up or down after standardization. "
+            f"Applying **SMOTE** shifts Recall by **{recall_gain:+.2%}**, trading some precision for "
+            "better detection of at-risk patients. Compared to KNN, Logistic Regression is the model of "
+            "choice when clinicians need to explain *why* a prediction was made, not just what it is."
+        )
+
+        st.divider()
+
+        # ==========================================
+        # 2. HIGH-LEVEL METRICS IMPACT
+        # ==========================================
+        st.subheader("📊 High-Level Metrics Impact (SMOTE vs. Basic)")
+
+        def get_delta_lr(metric):
+            return float(lr_smote_row[metric] - lr_basic_row[metric])
+
+        c1, c2, c3, c4, c5 = st.columns(5)
+        c1.metric("Accuracy", f"{lr_smote_row['Accuracy']:.4f}", f"{get_delta_lr('Accuracy'):.4f}")
+        c2.metric("Precision", f"{lr_smote_row['Precision']:.4f}", f"{get_delta_lr('Precision'):.4f}")
+        c3.metric("Recall", f"{lr_smote_row['Recall']:.4f}", f"{get_delta_lr('Recall'):.4f}")
+        c4.metric("F1-Score", f"{lr_smote_row['F1-Score']:.4f}", f"{get_delta_lr('F1-Score'):.4f}")
+        c5.metric("ROC-AUC", f"{lr_smote_row['ROC-AUC']:.4f}", f"{get_delta_lr('ROC-AUC'):.4f}")
+
+        st.divider()
+
+        # ==========================================
+        # 3. VISUAL EVALUATION
+        # ==========================================
+        st.subheader("📈 Visual Evaluation")
+        st.write("Navigate through the tabs below to explore the model visualizations.")
+
+        lr_chart_tab1, lr_chart_tab2, lr_chart_tab3 = st.tabs(["📊 Metric Comparison", "🟦 Confusion Matrices", "📉 ROC Curves"])
+
+        with lr_chart_tab1:
+            st.pyplot(lgm.plot_metric_comparison(results_df_lr))
+
+        with lr_chart_tab2:
+            st.pyplot(lgm.plot_confusion_matrices(results_lr))
+
+        with lr_chart_tab3:
+            lr_roc_col1, lr_roc_col2, lr_roc_col3 = st.columns([1, 2, 1])
+            with lr_roc_col2:
+                st.pyplot(lgm.plot_roc_curves(results_lr, y_test_lr))
+
+        st.divider()
+
+        # ==========================================
+        # 4. DETAILED CLASS BREAKDOWN
+        # ==========================================
+        st.subheader("🔍 Class-by-Class Breakdown")
+
+        col_lr_basic, col_lr_smote = st.columns(2)
+        lr_models_list = list(results_lr.keys())
+
+        with col_lr_basic:
+            res_lr_basic = results_lr[lr_models_list[0]]
+            st.markdown(f"### 🔵 {lr_models_list[0]}")
+            st.info(f"**🎯 Overall Accuracy:** {res_lr_basic['metrics']['Accuracy']:.2%} &nbsp; | &nbsp; **📈 ROC-AUC:** {res_lr_basic['metrics']['ROC-AUC']:.2%}")
+
+            report_lr_basic = lgm.classification_report(y_test_lr, res_lr_basic["y_pred"], output_dict=True, zero_division=0)
+            df_rep_lr_basic = pd.DataFrame(report_lr_basic).transpose()
+            df_rep_lr_basic.rename(index={'0': 'No Disease (0)', '1': 'Disease (1)', 'macro avg': 'Macro Avg', 'weighted avg': 'Weighted Avg'}, inplace=True)
+            df_rep_lr_basic = df_rep_lr_basic.drop(index=['accuracy'], errors='ignore').drop(columns=['support'], errors='ignore')
+
+            st.dataframe(df_rep_lr_basic.style.background_gradient(cmap='Blues').format("{:.3f}"), use_container_width=True)
+
+            with st.expander("⚙️ View Basic Hyperparameters"):
+                st.json(res_lr_basic['metrics']['Best Params'])
+
+        with col_lr_smote:
+            res_lr_smote = results_lr[lr_models_list[1]]
+            st.markdown(f"### 🟢 {lr_models_list[1]}")
+            st.success(f"**🎯 Overall Accuracy:** {res_lr_smote['metrics']['Accuracy']:.2%} &nbsp; | &nbsp; **📈 ROC-AUC:** {res_lr_smote['metrics']['ROC-AUC']:.2%}")
+
+            report_lr_smote = lgm.classification_report(y_test_lr, res_lr_smote["y_pred"], output_dict=True, zero_division=0)
+            df_rep_lr_smote = pd.DataFrame(report_lr_smote).transpose()
+            df_rep_lr_smote.rename(index={'0': 'No Disease (0)', '1': 'Disease (1)', 'macro avg': 'Macro Avg', 'weighted avg': 'Weighted Avg'}, inplace=True)
+            df_rep_lr_smote = df_rep_lr_smote.drop(index=['accuracy'], errors='ignore').drop(columns=['support'], errors='ignore')
+
+            st.dataframe(df_rep_lr_smote.style.background_gradient(cmap='Greens').format("{:.3f}"), use_container_width=True)
+
+            with st.expander("⚙️ View SMOTE Hyperparameters"):
+                st.json(res_lr_smote['metrics']['Best Params'])
+
+        st.divider()
+
+        # ==========================================
+        # 5. COEFFICIENT INTERPRETABILITY (LR-specific)
+        # ==========================================
+        st.subheader("🧭 Coefficient Interpretability")
+        st.write(
+            "Since features are standardized before fitting, each coefficient's magnitude reflects "
+            "how strongly that feature moves predicted risk -- positive pushes toward Disease, negative toward No Disease."
+        )
+
+        coef_tab_basic, coef_tab_smote = st.tabs([f"🔵 {lr_models_list[0]}", f"🟢 {lr_models_list[1]}"])
+
+        with coef_tab_basic:
+            coef_df_basic = lgm.get_coefficients(res_lr_basic["best_model"], X.columns.tolist())
+            coef_col1, coef_col2 = st.columns([1.3, 1])
+            with coef_col1:
+                st.pyplot(lgm.plot_coefficients(coef_df_basic, "Basic Logistic Regression -- Feature Influence"))
+            with coef_col2:
+                st.dataframe(
+                    coef_df_basic[["Rank", "Feature", "Coefficient", "Effect"]],
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+        with coef_tab_smote:
+            coef_df_smote = lgm.get_coefficients(res_lr_smote["best_model"], X.columns.tolist())
+            coef_col3, coef_col4 = st.columns([1.3, 1])
+            with coef_col3:
+                st.pyplot(lgm.plot_coefficients(coef_df_smote, "SMOTE Logistic Regression -- Feature Influence"))
+            with coef_col4:
+                st.dataframe(
+                    coef_df_smote[["Rank", "Feature", "Coefficient", "Effect"]],
+                    use_container_width=True,
+                    hide_index=True,
+                )
 
     # -------------------------------------------------------------------------
     # TAB 3: Random Forest (Placeholder)
