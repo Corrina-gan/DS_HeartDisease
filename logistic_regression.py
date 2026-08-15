@@ -103,8 +103,16 @@ def build_smote_pipeline():
 # --------------------------------------------------------------------------
 
 def tune_and_evaluate(pipeline, param_grid, X_train, X_test, y_train, y_test, model_name, cv=5):
+    # Scored on F1 (not ROC-AUC) so the search picks hyperparameters -- and a
+    # class_weight -- that actually detect the positive class at the default
+    # 0.5 threshold, instead of hyperparameters that only rank well.
+    # n_jobs capped (not -1): this grid has 60 candidates x 5 folds, and on a
+    # high-core/low-RAM machine "one worker per core" can spawn enough loky
+    # processes to exhaust memory mid-search (observed: MemoryError /
+    # BrokenProcessPool while pickling tasks to workers).
+    n_jobs = min(4, os.cpu_count() or 1)
     grid = GridSearchCV(
-        pipeline, param_grid, cv=cv, scoring="roc_auc", n_jobs=-1, verbose=1,
+        pipeline, param_grid, cv=cv, scoring="f1", n_jobs=n_jobs, verbose=1,
     )
     grid.fit(X_train, y_train)
     best_model = grid.best_estimator_
@@ -116,7 +124,7 @@ def tune_and_evaluate(pipeline, param_grid, X_train, X_test, y_train, y_test, mo
         "Model": model_name,
         "Split": f"{int((1 - TEST_SIZE) * 100)}/{int(TEST_SIZE * 100)}",
         "Best Params": grid.best_params_,
-        "CV ROC-AUC (best)": round(grid.best_score_, 4),
+        "CV F1 (best)": round(grid.best_score_, 4),
         "Accuracy": round(accuracy_score(y_test, y_pred), 4),
         "Precision": round(precision_score(y_test, y_pred, zero_division=0), 4),
         "Recall": round(recall_score(y_test, y_pred), 4),
@@ -240,7 +248,7 @@ def run_logreg_experiments(path="heart_disease.csv", save_outputs=True, show_plo
         X_train, X_test, y_train, y_test, "1. Basic Logistic Regression",
     )
     print(f"Best Params: {basic_results['metrics']['Best Params']}")
-    print(f"Best CV ROC-AUC: {basic_results['metrics']['CV ROC-AUC (best)']}")
+    print(f"Best CV F1: {basic_results['metrics']['CV F1 (best)']}")
     print(basic_results["classification_report"])
 
     section("2. SMOTE Logistic Regression (70/30 split)")
@@ -249,7 +257,7 @@ def run_logreg_experiments(path="heart_disease.csv", save_outputs=True, show_plo
         X_train, X_test, y_train, y_test, "2. SMOTE Logistic Regression",
     )
     print(f"Best Params: {smote_results['metrics']['Best Params']}")
-    print(f"Best CV ROC-AUC: {smote_results['metrics']['CV ROC-AUC (best)']}")
+    print(f"Best CV F1: {smote_results['metrics']['CV F1 (best)']}")
     print(smote_results["classification_report"])
 
     all_results = {
