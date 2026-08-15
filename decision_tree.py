@@ -16,11 +16,14 @@ from sklearn.metrics import (
 )
 from imblearn.pipeline import Pipeline as ImbPipeline
 from imblearn.over_sampling import SMOTE
+from sklearn.inspection import permutation_importance
 
 from data_preprocessing import run_pipeline, RANDOM_STATE
 
 TEST_SIZE = 0.30
 OUTPUT_DIR = "outputs"
+
+DT_SCORING = "f1"
 
 BASIC_PARAM_GRID = {
     "dt__criterion": ["gini", "entropy"],
@@ -80,10 +83,16 @@ def build_smote_pipeline():
 # Tune + evaluate
 # --------------------------------------------------------------------------
 
-def tune_and_evaluate(pipeline, param_grid, X_train, X_test, y_train, y_test, model_name, cv=5):
+def tune_and_evaluate(pipeline, param_grid, X_train, X_test, y_train, y_test, model_name, cv=5, scoring=DT_SCORING):
     grid = GridSearchCV(
-        pipeline, param_grid, cv=cv, scoring="roc_auc", n_jobs=-1, verbose=1,
+        pipeline,
+        param_grid,
+        cv=cv,
+        scoring=scoring,
+        n_jobs=-1,
+        verbose=1,
     )
+
     grid.fit(X_train, y_train)
     best_model = grid.best_estimator_
 
@@ -94,7 +103,8 @@ def tune_and_evaluate(pipeline, param_grid, X_train, X_test, y_train, y_test, mo
         "Model": model_name,
         "Split": f"{int((1 - TEST_SIZE) * 100)}/{int(TEST_SIZE * 100)}",
         "Best Params": grid.best_params_,
-        "CV ROC-AUC (best)": round(grid.best_score_, 4),
+        "CV Scoring Metric": scoring,
+        f"CV {scoring.upper()} (best)": round(grid.best_score_, 4),
         "Accuracy": round(accuracy_score(y_test, y_pred), 4),
         "Precision": round(precision_score(y_test, y_pred, zero_division=0), 4),
         "Recall": round(recall_score(y_test, y_pred), 4),
@@ -116,6 +126,48 @@ def tune_and_evaluate(pipeline, param_grid, X_train, X_test, y_train, y_test, mo
 # --------------------------------------------------------------------------
 # Visualizations
 # --------------------------------------------------------------------------
+def get_permutation_importance(model, X_test, y_test):
+    """Calculates permutation importance, measured as the drop in score when a
+    single feature's values are shuffled."""
+    result = permutation_importance(model, X_test, y_test, n_repeats=5, random_state=RANDOM_STATE, n_jobs=-1)
+
+    imp_df = pd.DataFrame({
+        "Feature": X_test.columns,
+        "Importance": result.importances_mean,
+        "Std_Dev": result.importances_std
+    })
+
+    imp_df = imp_df.sort_values(by="Importance", ascending=False).reset_index(drop=True)
+    imp_df.index += 1
+    imp_df.index.name = "Rank"
+
+    return imp_df.reset_index()
+
+
+def plot_permutation_importance(imp_df, title, top_n=None):
+    """Plots feature permutation importance. Shows every feature by default;
+    pass top_n to limit to the highest-ranked ones."""
+    plot_df = imp_df if top_n is None else imp_df.head(top_n)
+
+    # Grow the figure with the number of bars so the labels stay readable.
+    height = max(6, 0.32 * len(plot_df))
+    fig, ax = plt.subplots(figsize=(8, height))
+
+    sns.barplot(
+        x="Importance",
+        y="Feature",
+        data=plot_df,
+        palette="viridis",
+        ax=ax
+    )
+
+    ax.axvline(0, color="grey", linewidth=1)
+    ax.set_title(title, fontweight='bold')
+    ax.set_xlabel("Mean Accuracy Decrease (Importance)")
+    ax.set_ylabel("")
+    plt.tight_layout()
+    return fig
+
 
 def plot_confusion_matrices(all_results, class_labels=("No", "Yes")):
     n = len(all_results)
@@ -179,18 +231,20 @@ def run_decision_tree_experiments(path="heart_disease.csv", save_outputs=True, s
     basic_results = tune_and_evaluate(
         build_basic_pipeline(), BASIC_PARAM_GRID,
         X_train, X_test, y_train, y_test, "1. Basic Decision Tree",
+        scoring=DT_SCORING,
     )
     print(f"Best Params: {basic_results['metrics']['Best Params']}")
-    print(f"Best CV ROC-AUC: {basic_results['metrics']['CV ROC-AUC (best)']}")
+    print(f"Best CV {DT_SCORING.upper()}: {basic_results['metrics'][f'CV {DT_SCORING.upper()} (best)']}")
     print(basic_results["classification_report"])
 
     section("2. SMOTE Decision Tree (70/30 split)")
     smote_results = tune_and_evaluate(
         build_smote_pipeline(), SMOTE_PARAM_GRID,
         X_train, X_test, y_train, y_test, "2. SMOTE Decision Tree",
+        scoring=DT_SCORING,
     )
     print(f"Best Params: {smote_results['metrics']['Best Params']}")
-    print(f"Best CV ROC-AUC: {smote_results['metrics']['CV ROC-AUC (best)']}")
+    print(f"Best CV {DT_SCORING.upper()}: {smote_results['metrics'][f'CV {DT_SCORING.upper()} (best)']}")
     print(smote_results["classification_report"])
 
     all_results = {

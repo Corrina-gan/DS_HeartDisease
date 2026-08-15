@@ -161,6 +161,7 @@ results_df = pd.DataFrame([res["metrics"] for res in results.values()])
 
 dt_trained = train_decision_trees(X, y)
 dt_results = dt_trained["results"]
+dt_X_test = dt_trained["X_test"]
 dt_y_test = dt_trained["y_test"]
 dt_results_df = pd.DataFrame([res["metrics"] for res in dt_results.values()])
 
@@ -787,17 +788,24 @@ elif page == "📊 Model Comparison":
     with model_tabs[3]:
         st.header("Decision Tree")
 
+        dt_basic = dt_results_df.iloc[0]
+        dt_smote = dt_results_df.iloc[1]
+
         # ==========================================
         # 1. EXECUTIVE SUMMARY
         # ==========================================
         st.info(
             "**📝 Executive Summary & Report Conclusion:**\n\n"
-            "The **Basic Decision Tree** optimises for overall Accuracy, which on this imbalanced "
-            "dataset means it never flags a patient as at-risk (Recall of 0). "
-            "Applying **SMOTE** balances the training data so the tree learns splits that actually "
-            "separate the positive class, raising Recall substantially. In medical diagnostics, "
-            "minimizing False Negatives is critical, making the **SMOTE-tuned Decision Tree** the "
-            "superior practical model despite the drop in raw accuracy."
+            f"The **Basic Decision Tree** reaches "
+            f"**{dt_basic['Accuracy']:.1%}** accuracy simply by predicting nearly everyone is healthy but giving a very low Recall of only **{dt_basic['Recall']:.1%}**. This "
+            "means almost every patient is classified as *No Disease*, making it useless as a medical diagnostic tool.\n\n"
+            f"Using **SMOTE** helps the model handle the imbalanced data better. Recall increases to **{dt_smote['Recall']:.1%}** "
+            f"({dt_smote['Recall'] - dt_basic['Recall']:+.1%}), while ROC-AUC is **{dt_smote['ROC-AUC']:.3f}** "
+            f"({dt_smote['ROC-AUC'] - dt_basic['ROC-AUC']:+.3f}). However, accuracy decreases to **{dt_smote['Accuracy']:.1%}**.\n\n"
+            "**Conclusion:** For medical screening, finding patients with heart disease is more important than having high accuracy, "
+            "so the **SMOTE-tuned Decision Tree** is the recommended pipeline for this algorithm. The Basic "
+            "tree is retained only as a baseline that demonstrates how misleading raw accuracy becomes "
+            "under class imbalance."
         )
 
         st.divider()
@@ -805,10 +813,7 @@ elif page == "📊 Model Comparison":
         # ==========================================
         # 2. HIGH-LEVEL METRICS IMPACT
         # ==========================================
-        st.subheader("📊 High-Level Metrics Impact (SMOTE vs. Basic)")
-
-        dt_basic = dt_results_df.iloc[0]
-        dt_smote = dt_results_df.iloc[1]
+        st.subheader("📊 High-Level Metrics Impact : SMOTE vs. Basic")
 
         def get_dt_delta(metric):
             return float(dt_smote[metric] - dt_basic[metric])
@@ -882,3 +887,37 @@ elif page == "📊 Model Comparison":
 
             with st.expander("⚙️ View SMOTE Hyperparameters"):
                 st.json(dt_res_smote['metrics']['Best Params'])
+
+        # ==========================================
+        # 5. FEATURE IMPORTANCE (Permutation)
+        # ==========================================
+        st.divider()
+        st.subheader("🧭 Permutation Feature Importance")
+        st.write("Permutation importance measures how much each feature contributes to the model's predictive performance. "
+                 "A higher importance score indicates that the feature is more influential in determining the model's predictions.")
+
+        dt_perm_basic, dt_perm_smote = st.tabs([f"🔵 {dt_models_list[0]}", f"🟢 {dt_models_list[1]}"])
+
+        with dt_perm_basic:
+            dt_imp_basic = dtm.get_permutation_importance(dt_res_basic["best_model"], dt_X_test, dt_y_test)
+            dt_perm_col1, dt_perm_col2 = st.columns([1.3, 1])
+            with dt_perm_col1:
+                st.pyplot(dtm.plot_permutation_importance(dt_imp_basic, "Basic Decision Tree -- All Features"))
+            with dt_perm_col2:
+                st.dataframe(
+                    dt_imp_basic[["Rank", "Feature", "Importance"]].style.format({"Importance": "{:.4f}"}),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+        with dt_perm_smote:
+            dt_imp_smote = dtm.get_permutation_importance(dt_res_smote["best_model"], dt_X_test, dt_y_test)
+            dt_perm_col3, dt_perm_col4 = st.columns([1.3, 1])
+            with dt_perm_col3:
+                st.pyplot(dtm.plot_permutation_importance(dt_imp_smote, "SMOTE Decision Tree -- All Features"))
+            with dt_perm_col4:
+                st.dataframe(
+                    dt_imp_smote[["Rank", "Feature", "Importance"]].style.format({"Importance": "{:.4f}"}),
+                    use_container_width=True,
+                    hide_index=True,
+                )
