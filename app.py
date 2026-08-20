@@ -1,4 +1,6 @@
+import os
 
+import joblib
 import streamlit as st
 import pandas as pd
 
@@ -13,11 +15,18 @@ import random_forest as rfm
 st.set_page_config(page_title="Heart Disease Risk", layout="wide", page_icon="\u2764\ufe0f")
 
 DEFAULT_DATA_PATH = "heart_disease.csv"
+MODEL_CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".model_cache")
+os.makedirs(MODEL_CACHE_DIR, exist_ok=True)
 
 
-# ---------------------------------------------------------------------------
-# Cached data / model loading
-# ---------------------------------------------------------------------------
+def load_or_train(cache_name, compute_fn, X, y):
+    path = os.path.join(MODEL_CACHE_DIR, f"{cache_name}.joblib")
+    if os.path.exists(path):
+        return joblib.load(path)
+    data = compute_fn(X, y)
+    joblib.dump(data, path)
+    return data
+
 
 @st.cache_data(show_spinner="Loading & preprocessing data...")
 def load_pipeline_data(path):
@@ -31,80 +40,114 @@ def load_raw_data(path):
     return df, numeric_cols, categorical_cols
 
 
-@st.cache_resource(show_spinner="Training Basic KNN & SMOTE KNN (grid search, one-time)...")
-def train_models(X, y):
-    X_train, X_test, y_train, y_test = km.get_70_30_split(X, y)
-    basic = km.tune_and_evaluate(
-        km.build_basic_pipeline(), km.BASIC_PARAM_GRID,
-        X_train, X_test, y_train, y_test, "1. Basic KNN",
-    )
-    smote = km.tune_and_evaluate(
-        km.build_smote_pipeline(), km.SMOTE_PARAM_GRID,
-        X_train, X_test, y_train, y_test, "2. SMOTE KNN",
-    )
-    return {
-        "X_train": X_train, "X_test": X_test, "y_train": y_train, "y_test": y_test,
-        "results": {"1. Basic KNN": basic, "2. SMOTE KNN": smote},
-    }
+@st.cache_resource(show_spinner=False)
+def train_knn_basic(X, y):
+    def _compute(X, y):
+        X_train, X_test, y_train, y_test = km.get_70_30_split(X, y)
+        result = km.tune_and_evaluate(
+            km.build_basic_pipeline(), km.BASIC_PARAM_GRID,
+            X_train, X_test, y_train, y_test, "1. Basic KNN",
+        )
+        return {"X_test": X_test, "y_test": y_test, "result": result}
+    return load_or_train("knn_basic", _compute, X, y)
 
 
-@st.cache_resource(show_spinner="Training Basic & SMOTE Decision Tree (grid search, one-time)...")
-def train_decision_trees(X, y):
-    X_train, X_test, y_train, y_test = dtm.get_70_30_split(X, y)
-    basic = dtm.tune_and_evaluate(
-        dtm.build_basic_pipeline(), dtm.BASIC_PARAM_GRID,
-        X_train, X_test, y_train, y_test, "1. Basic Decision Tree",
-    )
-    smote = dtm.tune_and_evaluate(
-        dtm.build_smote_pipeline(), dtm.SMOTE_PARAM_GRID,
-        X_train, X_test, y_train, y_test, "2. SMOTE Decision Tree",
-    )
-    return {
-        "X_train": X_train, "X_test": X_test, "y_train": y_train, "y_test": y_test,
-        "results": {"1. Basic Decision Tree": basic, "2. SMOTE Decision Tree": smote},
-    }
+@st.cache_resource(show_spinner=False)
+def train_knn_smote(X, y):
+    def _compute(X, y):
+        X_train, X_test, y_train, y_test = km.get_70_30_split(X, y)
+        result = km.tune_and_evaluate(
+            km.build_smote_pipeline(), km.SMOTE_PARAM_GRID,
+            X_train, X_test, y_train, y_test, "2. SMOTE KNN",
+        )
+        return {"X_test": X_test, "y_test": y_test, "result": result}
+    return load_or_train("knn_smote", _compute, X, y)
 
 
-@st.cache_resource(show_spinner="Training Basic & SMOTE Logistic Regression (grid search, one-time)...")
-def train_logreg_models(X, y):
-    X_train, X_test, y_train, y_test = lgm.get_70_30_split(X, y)
-    basic = lgm.tune_and_evaluate(
-        lgm.build_basic_pipeline(), lgm.BASIC_PARAM_GRID,
-        X_train, X_test, y_train, y_test, "1. Basic Logistic Regression",
-    )
-    smote = lgm.tune_and_evaluate(
-        lgm.build_smote_pipeline(), lgm.SMOTE_PARAM_GRID,
-        X_train, X_test, y_train, y_test, "2. SMOTE Logistic Regression",
-    )
-    return {
-        "X_train": X_train, "X_test": X_test, "y_train": y_train, "y_test": y_test,
-        "results": {"1. Basic Logistic Regression": basic, "2. SMOTE Logistic Regression": smote},
-    }
+@st.cache_resource(show_spinner=False)
+def train_dt_basic(X, y):
+    def _compute(X, y):
+        X_train, X_test, y_train, y_test = dtm.get_70_30_split(X, y)
+        result = dtm.tune_and_evaluate(
+            dtm.build_basic_pipeline(), dtm.BASIC_PARAM_GRID,
+            X_train, X_test, y_train, y_test, "1. Basic Decision Tree",
+        )
+        return {"X_test": X_test, "y_test": y_test, "result": result}
+    return load_or_train("dt_basic", _compute, X, y)
 
 
-@st.cache_resource(show_spinner="Training Basic & SMOTE Random Forest (grid search, one-time)...")
-def train_random_forests(X, y):
-    X_train, X_test, y_train, y_test = rfm.get_70_30_split(X, y)
-    basic = rfm.tune_and_evaluate(
-        rfm.build_basic_pipeline(), rfm.BASIC_PARAM_GRID,
-        X_train, X_test, y_train, y_test, "1. Basic Random Forest",
-    )
-    smote = rfm.tune_and_evaluate(
-        rfm.build_smote_pipeline(), rfm.SMOTE_PARAM_GRID,
-        X_train, X_test, y_train, y_test, "2. SMOTE Random Forest",
-    )
-    return {
-        "X_train": X_train, "X_test": X_test, "y_train": y_train, "y_test": y_test,
-        "results": {"1. Basic Random Forest": basic, "2. SMOTE Random Forest": smote},
-    }
+@st.cache_resource(show_spinner=False)
+def train_dt_smote(X, y):
+    def _compute(X, y):
+        X_train, X_test, y_train, y_test = dtm.get_70_30_split(X, y)
+        result = dtm.tune_and_evaluate(
+            dtm.build_smote_pipeline(), dtm.SMOTE_PARAM_GRID,
+            X_train, X_test, y_train, y_test, "2. SMOTE Decision Tree",
+        )
+        return {"X_test": X_test, "y_test": y_test, "result": result}
+    return load_or_train("dt_smote", _compute, X, y)
 
 
-# ---------------------------------------------------------------------------
-# Sidebar Navigation
-# ---------------------------------------------------------------------------
+@st.cache_resource(show_spinner=False)
+def train_lr_basic(X, y):
+    def _compute(X, y):
+        X_train, X_test, y_train, y_test = lgm.get_70_30_split(X, y)
+        result = lgm.tune_and_evaluate(
+            lgm.build_basic_pipeline(), lgm.BASIC_PARAM_GRID,
+            X_train, X_test, y_train, y_test, "1. Basic Logistic Regression",
+        )
+        return {"X_test": X_test, "y_test": y_test, "result": result}
+    return load_or_train("lr_basic", _compute, X, y)
+
+
+@st.cache_resource(show_spinner=False)
+def train_lr_smote(X, y):
+    def _compute(X, y):
+        X_train, X_test, y_train, y_test = lgm.get_70_30_split(X, y)
+        result = lgm.tune_and_evaluate(
+            lgm.build_smote_pipeline(), lgm.SMOTE_PARAM_GRID,
+            X_train, X_test, y_train, y_test, "2. SMOTE Logistic Regression",
+        )
+        return {"X_test": X_test, "y_test": y_test, "result": result}
+    return load_or_train("lr_smote", _compute, X, y)
+
+
+@st.cache_resource(show_spinner=False)
+def train_rf_basic(X, y):
+    def _compute(X, y):
+        X_train, X_test, y_train, y_test = rfm.get_70_30_split(X, y)
+        result = rfm.tune_and_evaluate(
+            rfm.build_basic_pipeline(), rfm.BASIC_PARAM_GRID,
+            X_train, X_test, y_train, y_test, "1. Basic Random Forest",
+        )
+        return {"X_test": X_test, "y_test": y_test, "result": result}
+    return load_or_train("rf_basic", _compute, X, y)
+
+
+@st.cache_resource(show_spinner=False)
+def train_rf_smote(X, y):
+    def _compute(X, y):
+        X_train, X_test, y_train, y_test = rfm.get_70_30_split(X, y)
+        result = rfm.tune_and_evaluate(
+            rfm.build_smote_pipeline(), rfm.SMOTE_PARAM_GRID,
+            X_train, X_test, y_train, y_test, "2. SMOTE Random Forest",
+        )
+        return {"X_test": X_test, "y_test": y_test, "result": result}
+    return load_or_train("rf_smote", _compute, X, y)
+
+
+def run_training_jobs(label, jobs):
+    outputs = {}
+    with st.status(label, expanded=True) as status:
+        for name, (func, X, y) in jobs.items():
+            outputs[name] = func(X, y)
+            status.write(f"✅ {name} ready")
+        status.update(label=f"{label} — done", state="complete")
+    return outputs
+
 
 with st.sidebar:
-    # Inject Custom CSS to make sidebar menu items large, wide, and very easy to click
+
     st.markdown(
         """
         <style>
@@ -135,28 +178,38 @@ with st.sidebar:
         unsafe_allow_html=True
     )
 
-    # Centered, styled title for a professional clinic feel
-    st.markdown("<h2 style='text-align: center; color: #c44e52;'>❤️ Heart Disease Prediction</h2>", unsafe_allow_html=True)    
+
+    st.markdown("<h2 style='text-align: center; color: #c44e52;'>❤️ Heart Disease Prediction</h2>", unsafe_allow_html=True)
     st.divider()
     st.markdown("### 🧭 Main Menu")
-    
-    page = st.sidebar.radio(
+
+    main_page = st.radio(
         "Navigate",
         [
-            "🏠 Home (Predict & Overview)", 
-            "🔍 EDA", 
-            "🧹 Preprocessing", 
-            "📊 Model Comparison"
+            "🏠 Home (Predict & Overview)",
+            "📊 Model Comparison",
         ],
         label_visibility="collapsed"
     )
 
-# ---------------------------------------------------------------------------
-# Load data + PREFETCH Heavy Computations
-# ---------------------------------------------------------------------------
+    st.divider()
+    with st.expander("🔧 More"):
+        extra_page = st.radio(
+            "More pages",
+            [
+                "🔍 EDA",
+                "🧹 Preprocessing",
+                "⚖️ Basic vs SMOTE",
+            ],
+            index=None,
+            label_visibility="collapsed",
+        )
+
+    page = extra_page if extra_page else main_page
+
 
 try:
-    # Directly load from the hardcoded local CSV file
+
     raw_df, numeric_cols, categorical_cols = load_raw_data(DEFAULT_DATA_PATH)
     pipeline_data = load_pipeline_data(DEFAULT_DATA_PATH)
 except FileNotFoundError:
@@ -171,35 +224,39 @@ le_target = pipeline_data["le_target"]
 missing_treatment_summary = pipeline_data["missing_treatment_summary"]
 target_mapping = dict(zip(le_target.classes_, le_target.transform(le_target.classes_)))
 
-trained = train_models(X, y)
-results = trained["results"]
-X_test = trained["X_test"] 
-y_test = trained["y_test"]
-results_df = pd.DataFrame([res["metrics"] for res in results.values()])
+basic_jobs = {
+    "KNN": (train_knn_basic, X, y),
+    "Decision Tree": (train_dt_basic, X, y),
+    "Logistic Regression": (train_lr_basic, X, y),
+    "Random Forest": (train_rf_basic, X, y),
+}
+basic_trained = run_training_jobs("Training Basic models", basic_jobs)
 
-dt_trained = train_decision_trees(X, y)
-dt_results = dt_trained["results"]
-dt_X_test = dt_trained["X_test"]
-dt_y_test = dt_trained["y_test"]
-dt_results_df = pd.DataFrame([res["metrics"] for res in dt_results.values()])
+knn_basic_data = basic_trained["KNN"]
+X_test, y_test = knn_basic_data["X_test"], knn_basic_data["y_test"]
 
-trained_lr = train_logreg_models(X, y)
-results_lr = trained_lr["results"]
-y_test_lr = trained_lr["y_test"]
-results_df_lr = pd.DataFrame([res["metrics"] for res in results_lr.values()])
+dt_basic_data = basic_trained["Decision Tree"]
+dt_X_test, dt_y_test = dt_basic_data["X_test"], dt_basic_data["y_test"]
 
-rf_trained = train_random_forests(X, y)
-rf_results = rf_trained["results"]
-rf_X_test = rf_trained["X_test"]
-rf_y_test = rf_trained["y_test"]
-rf_results_df = pd.DataFrame([res["metrics"] for res in rf_results.values()])
+lr_basic_data = basic_trained["Logistic Regression"]
+y_test_lr = lr_basic_data["y_test"]
 
-# Combined view across all trained model families, used by the Home predictor
-# and the dataset overview so they reflect the current best model overall.
-all_results = {**results, **results_lr, **dt_results, **rf_results}
-all_results_df = pd.concat([results_df, results_df_lr, dt_results_df, rf_results_df], ignore_index=True)
+rf_basic_data = basic_trained["Random Forest"]
+rf_X_test, rf_y_test = rf_basic_data["X_test"], rf_basic_data["y_test"]
 
-# --- PREFETCH MAGIC HAPPENS HERE ---
+basic_results = {
+    "KNN": knn_basic_data["result"],
+    "Logistic Regression": lr_basic_data["result"],
+    "Random Forest": rf_basic_data["result"],
+    "Decision Tree": dt_basic_data["result"],
+}
+basic_metric_cols = ["Accuracy", "Precision", "Recall", "F1-Score", "ROC-AUC"]
+basic_df = pd.DataFrame([{**res["metrics"], "Model": name} for name, res in basic_results.items()])
+
+all_results = basic_results
+all_results_df = basic_df
+
+
 @st.cache_resource(show_spinner="Prefetching EDA Plots (One-time setup)...")
 def prefetch_eda_plots(df, num_cols, cat_cols):
     return {
@@ -225,20 +282,11 @@ def prefetch_stats(df, num_cols, cat_cols, X_df, y_ser):
     chi2_df = dv.compute_chi2_scores(X_df, y_ser)
     return outlier_df, table_numeric, table_categorical, fig_assoc, mcar_df, fig_mcar, fig_corr, anova_df, chi2_df
 
-# Trigger the prefetch immediately!
-eda_figs = prefetch_eda_plots(raw_df, numeric_cols, categorical_cols)
-outlier_df, table_numeric, table_categorical, fig_assoc, mcar_df, fig_mcar, fig_corr, anova_df, chi2_df = prefetch_stats(raw_df, numeric_cols, categorical_cols, X, y)
 
-# =============================================================================
-# PAGE: Home (Predict & Overview)
-# =============================================================================
 if page == "🏠 Home (Predict & Overview)":
     st.title("❤️ Heart Disease Risk Dashboard")
-    st.markdown("Use the calculator below to assess patient risk, or scroll down to view the dataset overview.")
 
-    # -------------------------------------------------------------------------
-    # SECTION 1: LIVE PREDICTOR
-    # -------------------------------------------------------------------------
+
     st.header("🩺 Live Risk Predictor")
 
     model_choice = st.selectbox("Select Diagnostic Model:", list(all_results.keys()))
@@ -253,7 +301,7 @@ if page == "🏠 Home (Predict & Overview)":
             numeric_inputs[col] = cols[i % 3].number_input(col, value=default)
 
         st.divider()
-        
+
         st.subheader("Patient History & Lifestyle")
         categorical_inputs = {}
         cols2 = st.columns(3)
@@ -279,14 +327,14 @@ if page == "🏠 Home (Predict & Overview)":
 
         st.divider()
         st.subheader("Prediction Result")
-        
-        # Display the text result
+
+
         if pred == 1:
             st.error(f"### ⚠️ Prediction: {label}")
         else:
             st.success(f"### ✅ Prediction: {label}")
-        
-        # Create a compact, beautifully proportioned Plotly Gauge Chart
+
+
         fig_gauge = go.Figure(go.Indicator(
             mode="gauge+number",
             value=prob_disease * 100,
@@ -300,9 +348,9 @@ if page == "🏠 Home (Predict & Overview)":
                 'borderwidth': 2,
                 'bordercolor': "gray",
                 'steps': [
-                    {'range': [0, 30], 'color': "#d4edda"},   # Green (Low Risk)
-                    {'range': [30, 70], 'color': "#ffeeba"},  # Yellow (Moderate Risk)
-                    {'range': [70, 100], 'color': "#f8d7da"}  # Red (High Risk)
+                    {'range': [0, 30], 'color': "#d4edda"},
+                    {'range': [30, 70], 'color': "#ffeeba"},
+                    {'range': [70, 100], 'color': "#f8d7da"}
                 ],
                 'threshold': {
                     'line': {'color': "red", 'width': 4},
@@ -311,24 +359,22 @@ if page == "🏠 Home (Predict & Overview)":
                 }
             }
         ))
-        
-        # Shrink the overall height and tighten margins so it isn't massive
+
+
         fig_gauge.update_layout(height=250, margin=dict(l=20, r=20, t=40, b=20))
-        
-        # Center the gauge chart nicely
+
+
         g_col1, g_col2, g_col3 = st.columns([1, 2, 1])
         with g_col2:
             st.plotly_chart(fig_gauge, use_container_width=True)
 
-        st.write(f"<div style='text-align: center; color: #888;'>Powered by: {model_choice} | Best Params: {all_results[model_choice]['metrics']['Best Params']}</div>", unsafe_allow_html=True)
+        st.caption(f"Powered by {model_choice}")
 
-    # -------------------------------------------------------------------------
-    # SECTION 2: DATASET OVERVIEW
-    # -------------------------------------------------------------------------
+
     st.divider()
     st.header("📊 Dataset Overview")
 
-    # High-level Dataset Metrics
+
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Total Patient Records", f"{raw_df.shape[0]:,}")
     c2.metric("Total Attributes", raw_df.shape[1])
@@ -338,53 +384,52 @@ if page == "🏠 Home (Predict & Overview)":
     st.markdown("<br>", unsafe_allow_html=True)
 
     overview_col1, overview_col2 = st.columns([1, 1.5])
-    
+
     with overview_col1:
         st.markdown("**Target Class Balance**")
-        st.pyplot(eda_figs["class_dist"]) 
+        st.pyplot(dv.plot_class_distribution(raw_df))
 
     with overview_col2:
         st.markdown("**Current Top Performing Model**")
         best_name = all_results_df.loc[all_results_df["ROC-AUC"].idxmax(), "Model"]
         best_auc = all_results_df["ROC-AUC"].max()
         st.info(f"🏆 **{best_name}** currently leads with a test ROC-AUC of **{best_auc:.3f}**.")
-        
-        # Tidy up the UI by hiding the raw data inside an expander
+
+
         st.markdown("<br>", unsafe_allow_html=True)
         with st.expander("📂 View Sample Patient Records (Raw Data)"):
             st.dataframe(raw_df.head(15), use_container_width=True)
 
-# =============================================================================
-# PAGE: EDA
-# =============================================================================
+
 elif page == "🔍 EDA":
     st.title("🔍 Exploratory Data Analysis")
-    st.markdown("Explore the underlying patterns in the raw dataset before any cleaning or encoding.")
 
-    # Organize the massive list of charts into 3 logical, clickable tabs
+    eda_figs = prefetch_eda_plots(raw_df, numeric_cols, categorical_cols)
+    outlier_df, table_numeric, table_categorical, fig_assoc, mcar_df, fig_mcar, fig_corr, anova_df, chi2_df = prefetch_stats(raw_df, numeric_cols, categorical_cols, X, y)
+
     eda_tab1, eda_tab2, eda_tab3 = st.tabs([
-        "📊 Distributions", 
-        "🎯 Target Associations", 
+        "📊 Distributions",
+        "🎯 Target Associations",
         "🔬 Data Quality & Outliers"
     ])
 
     with eda_tab1:
         st.subheader("Feature & Class Distributions")
-        # Put Class Distribution and Categorical Dist side-by-side
+
         col_c1, col_c2 = st.columns([1, 1.5])
         with col_c1:
             st.pyplot(eda_figs["class_dist"])
         with col_c2:
             st.pyplot(eda_figs["cat_dist"])
-        
+
         st.divider()
         st.pyplot(eda_figs["num_dist"])
 
     with eda_tab2:
         st.subheader("How Features Relate to Heart Disease")
-        
+
         st.pyplot(fig_assoc)
-        
+
         colA, colB = st.columns(2)
         colA.markdown("**Numeric (Point-Biserial r)**")
         colA.dataframe(table_numeric, use_container_width=True)
@@ -397,10 +442,10 @@ elif page == "🔍 EDA":
 
     with eda_tab3:
         st.subheader("Correlations & Normality")
-        
+
         st.pyplot(eda_figs["corr_heat"])
         st.pyplot(eda_figs["qq_plots"])
-        
+
         st.divider()
         st.subheader("Outlier Detection (1.5× IQR)")
         st.pyplot(eda_figs["outliers"])
@@ -408,15 +453,14 @@ elif page == "🔍 EDA":
             st.dataframe(outlier_df, use_container_width=True)
 
 
-# =============================================================================
-# PAGE: Preprocessing
-# =============================================================================
 elif page == "🧹 Preprocessing":
     st.title("🧹 Data Preprocessing")
 
+    outlier_df, table_numeric, table_categorical, fig_assoc, mcar_df, fig_mcar, fig_corr, anova_df, chi2_df = prefetch_stats(raw_df, numeric_cols, categorical_cols, X, y)
+
     prep_tab1, prep_tab2, prep_tab3 = st.tabs([
-        "❓ Missing Values", 
-        "🔠 Encoding", 
+        "❓ Missing Values",
+        "🔠 Encoding",
         "✅ Feature Diagnostics"
     ])
 
@@ -434,10 +478,9 @@ elif page == "🧹 Preprocessing":
             display_summary = missing_treatment_summary.copy()
             display_summary["Imputation Value"] = display_summary["Imputation Value"].astype(str)
             st.dataframe(display_summary, use_container_width=True)
-            
+
         st.divider()
         st.subheader("MCAR Test: Alcohol Consumption")
-        st.markdown("Testing if missing 'Alcohol Consumption' data relates to other variables (Missing Completely At Random).")
         st.pyplot(fig_mcar)
 
     with prep_tab2:
@@ -469,9 +512,7 @@ elif page == "🧹 Preprocessing":
         col_d2.markdown("**Chi-Square scores**")
         col_d2.dataframe(chi2_df, use_container_width=True)
 
-# =============================================================================
-# PAGE: Predict
-# =============================================================================
+
 elif page == "\U0001F52E Predict":
     st.title("Predict Heart Disease Risk")
     st.caption("Fill in the fields, pick a model, and get a live prediction.")
@@ -516,48 +557,89 @@ elif page == "\U0001F52E Predict":
         st.caption(
             f"Model: {model_choice} \u2014 Best Params: `{results[model_choice]['metrics']['Best Params']}`"
         )
-# =============================================================================
-# PAGE: Model Comparison
-# =============================================================================
+
+
 elif page == "📊 Model Comparison":
-    st.title("Model Comparison")
-    st.caption("Evaluate and compare the performance of different models on the 70/30 split.")
+    st.title("📊 Model Comparison")
+    st.subheader("🏆 Algorithm Evaluation")
+    st.dataframe(
+        basic_df[["Model"] + basic_metric_cols].style
+            .highlight_max(subset=basic_metric_cols, color="#d4edda")
+            .format({c: "{:.4f}" for c in basic_metric_cols}),
+        use_container_width=True,
+        hide_index=True,
+    )
+    best_row = basic_df.loc[basic_df["ROC-AUC"].idxmax()]
+    st.success(f"🏆 **{best_row['Model']}** currently leads on test ROC-AUC (**{best_row['ROC-AUC']:.4f}**).")
+
+    st.divider()
+
+    st.subheader("🧭 Feature Importance (Top 10)")
+
+    imp_knn = km.get_permutation_importance(basic_results["KNN"]["best_model"], X_test, y_test).head(10)
+    coef_lr = lgm.get_coefficients(basic_results["Logistic Regression"]["best_model"], X.columns.tolist()).head(10)
+    imp_rf = rfm.get_permutation_importance(basic_results["Random Forest"]["best_model"], rf_X_test, rf_y_test).head(10)
+    imp_dt = dtm.get_permutation_importance(basic_results["Decision Tree"]["best_model"], dt_X_test, dt_y_test).head(10)
+
+    feature_summary = pd.DataFrame({
+        "Rank": range(1, 11),
+        "KNN": [f"{r.Feature} ({r.Importance:.3f})" for r in imp_knn.itertuples()],
+        "Logistic Regression": [f"{r.Feature} ({r.Coefficient:+.3f})" for r in coef_lr.itertuples()],
+        "Random Forest": [f"{r.Feature} ({r.Importance:.3f})" for r in imp_rf.itertuples()],
+        "Decision Tree": [f"{r.Feature} ({r.Importance:.3f})" for r in imp_dt.itertuples()],
+    })
+    st.dataframe(feature_summary, use_container_width=True, hide_index=True)
+    st.caption("KNN / Random Forest / Decision Tree values are permutation importance; Logistic Regression values are standardized coefficients.")
+
+
+elif page == "⚖️ Basic vs SMOTE":
+    st.title("⚖️ Basic vs SMOTE")
+    st.caption(
+        "Per-algorithm deep dive comparing the Basic pipeline against SMOTE oversampling on the 70/30 split — "
+        "the full visual evaluation and the analysis behind why 📊 Model Comparison uses Basic pipelines only."
+    )
 
     model_tabs = st.tabs(["K-Nearest Neighbors (KNN)", "Logistic Regression", "Random Forest", "Decision Tree"])
 
-# -------------------------------------------------------------------------
-    # TAB 1: KNN (Active Focus)
-    # -------------------------------------------------------------------------
+    smote_jobs = {
+        "KNN": (train_knn_smote, X, y),
+        "Decision Tree": (train_dt_smote, X, y),
+        "Logistic Regression": (train_lr_smote, X, y),
+        "Random Forest": (train_rf_smote, X, y),
+    }
+    smote_trained = run_training_jobs("Training SMOTE models", smote_jobs)
+
+    knn_smote_data = smote_trained["KNN"]
+    lr_smote_data = smote_trained["Logistic Regression"]
+    rf_smote_data = smote_trained["Random Forest"]
+    dt_smote_data = smote_trained["Decision Tree"]
+
+    results = {"1. Basic KNN": knn_basic_data["result"], "2. SMOTE KNN": knn_smote_data["result"]}
+    results_df = pd.DataFrame([r["metrics"] for r in results.values()])
+
+    results_lr = {"1. Basic Logistic Regression": lr_basic_data["result"], "2. SMOTE Logistic Regression": lr_smote_data["result"]}
+    results_df_lr = pd.DataFrame([r["metrics"] for r in results_lr.values()])
+
+    rf_results = {"1. Basic Random Forest": rf_basic_data["result"], "2. SMOTE Random Forest": rf_smote_data["result"]}
+    rf_results_df = pd.DataFrame([r["metrics"] for r in rf_results.values()])
+
+    dt_results = {"1. Basic Decision Tree": dt_basic_data["result"], "2. SMOTE Decision Tree": dt_smote_data["result"]}
+    dt_results_df = pd.DataFrame([r["metrics"] for r in dt_results.values()])
+
+
     with model_tabs[0]:
         st.header("K-Nearest Neighbors (KNN)")
-        
-        # ==========================================
-        # 1. EXECUTIVE SUMMARY (Moved to Top)
-        # ==========================================
-        st.info(
-            "**📝 Executive Summary & Report Conclusion:**\n\n"
-            "Both pipelines were tuned to optimise **F1-Score**. "
-            "While **SMOTE KNN** achieved a drastically higher Recall, it did so by severely over-predicting the positive class, "
-            "causing overall Accuracy to collapse to clinically unusable levels (~38%). "
-            "Therefore, **Basic KNN** is selected as the superior, more stable pipeline for this algorithm, "
-            "with SMOTE provided strictly as an experimental reference to illustrate the extreme cost of the precision-recall trade-off."
-        )
 
-        st.divider()
-
-        # ==========================================
-        # 2. HIGH-LEVEL METRICS IMPACT
-        # ==========================================
         st.subheader("📊 Baseline Metrics (& Impact of SMOTE)")
-        
+
         basic = results_df.iloc[0]
         smote = results_df.iloc[1]
-        
+
         def get_delta(metric):
-            # Calculate the impact: SMOTE minus Basic
+
             return float(smote[metric] - basic[metric])
 
-        # Large Metric Cards now display BASIC as the main number
+
         c1, c2, c3, c4, c5 = st.columns(5)
         c1.metric("Accuracy", f"{basic['Accuracy']:.4f}", f"{get_delta('Accuracy'):.4f}")
         c2.metric("Precision", f"{basic['Precision']:.4f}", f"{get_delta('Precision'):.4f}")
@@ -567,21 +649,18 @@ elif page == "📊 Model Comparison":
 
         st.divider()
 
-        # ==========================================
-        # 3. VISUAL EVALUATION (Organized into Tabs)
-        # ==========================================
+
         st.subheader("📈 Visual Evaluation")
-        st.write("Navigate through the tabs below to explore the model visualizations.")
-        
-        # Neatly organize the heavy graphs into clickable tabs to save vertical space
+
+
         chart_tab1, chart_tab2, chart_tab3 = st.tabs(["📊 Metric Comparison", "🟦 Confusion Matrices", "📉 ROC Curves"])
-        
+
         with chart_tab1:
             st.pyplot(km.plot_metric_comparison(results_df))
-            
+
         with chart_tab2:
             st.pyplot(km.plot_confusion_matrices(results))
-            
+
         with chart_tab3:
             roc_col1, roc_col2, roc_col3 = st.columns([1, 2, 1])
             with roc_col2:
@@ -589,54 +668,50 @@ elif page == "📊 Model Comparison":
 
         st.divider()
 
-        # ==========================================
-        # 4. DETAILED CLASS BREAKDOWN (Side-by-Side)
-        # ==========================================
+
         st.subheader("🔍 Class-by-Class Breakdown")
-        
+
         col_basic, col_smote = st.columns(2)
-        models_list = list(results.keys()) 
-        
-        # --- LEFT COLUMN: BASIC KNN ---
+        models_list = list(results.keys())
+
+
         with col_basic:
             res_basic = results[models_list[0]]
             st.markdown(f"### 🔵 {models_list[0]}")
             st.info(f"**🎯 Overall Accuracy:** {res_basic['metrics']['Accuracy']:.2%} &nbsp; | &nbsp; **📈 ROC-AUC:** {res_basic['metrics']['ROC-AUC']:.2%}")
-            
+
             report_basic = km.classification_report(y_test, res_basic["y_pred"], output_dict=True, zero_division=0)
             df_rep_basic = pd.DataFrame(report_basic).transpose()
             df_rep_basic.rename(index={'0': 'No Disease (0)', '1': 'Disease (1)', 'macro avg': 'Macro Avg', 'weighted avg': 'Weighted Avg'}, inplace=True)
             df_rep_basic = df_rep_basic.drop(index=['accuracy'], errors='ignore').drop(columns=['support'], errors='ignore')
-            
+
             st.dataframe(df_rep_basic.style.background_gradient(cmap='Blues').format("{:.3f}"), use_container_width=True)
-            
-            # Hide hyperparameters in a neat dropdown
+
+
             with st.expander("⚙️ View Basic Hyperparameters"):
                 st.json(res_basic['metrics']['Best Params'])
 
-        # --- RIGHT COLUMN: SMOTE KNN ---
+
         with col_smote:
             res_smote = results[models_list[1]]
             st.markdown(f"### 🟢 {models_list[1]}")
             st.success(f"**🎯 Overall Accuracy:** {res_smote['metrics']['Accuracy']:.2%} &nbsp; | &nbsp; **📈 ROC-AUC:** {res_smote['metrics']['ROC-AUC']:.2%}")
-            
+
             report_smote = km.classification_report(y_test, res_smote["y_pred"], output_dict=True, zero_division=0)
             df_rep_smote = pd.DataFrame(report_smote).transpose()
             df_rep_smote.rename(index={'0': 'No Disease (0)', '1': 'Disease (1)', 'macro avg': 'Macro Avg', 'weighted avg': 'Weighted Avg'}, inplace=True)
             df_rep_smote = df_rep_smote.drop(index=['accuracy'], errors='ignore').drop(columns=['support'], errors='ignore')
-            
+
             st.dataframe(df_rep_smote.style.background_gradient(cmap='Greens').format("{:.3f}"), use_container_width=True)
 
-            # Hide hyperparameters in a neat dropdown
+
             with st.expander("⚙️ View SMOTE Hyperparameters"):
                 st.json(res_smote['metrics']['Best Params'])
-    
-        # ==========================================
-        # 5. FEATURE IMPORTANCE (Permutation)
-        # ==========================================
+
+
         st.divider()
         st.subheader("🧭 Feature Importance (Permutation)")
-        
+
         perm_tab_basic, perm_tab_smote = st.tabs([f"🔵 {models_list[0]}", f"🟢 {models_list[1]}"])
 
         with perm_tab_basic:
@@ -661,34 +736,15 @@ elif page == "📊 Model Comparison":
                     imp_df_smote[["Rank", "Feature", "Importance"]].style.format({"Importance": "{:.4f}"}),
                     use_container_width=True,
                     hide_index=True,
-                )   
+                )
 
-    # -------------------------------------------------------------------------
-    # TAB 2: Logistic Regression
-    # -------------------------------------------------------------------------
+
     with model_tabs[1]:
         st.header("Logistic Regression")
 
-        # ==========================================
-        # 1. EXECUTIVE SUMMARY
-        # ==========================================
         lr_basic_row = results_df_lr.iloc[0]
         lr_smote_row = results_df_lr.iloc[1]
-        recall_gain = float(lr_smote_row["Recall"] - lr_basic_row["Recall"])
-        st.info(
-            "**📝 Executive Summary & Report Conclusion:**\n\n"
-            "Logistic Regression provides a fully interpretable baseline: each feature gets a signed "
-            "coefficient showing exactly how it moves risk up or down after standardization. "
-            f"Applying **SMOTE** shifts Recall by **{recall_gain:+.2%}**, trading some precision for "
-            "better detection of at-risk patients. Compared to KNN, Logistic Regression is the model of "
-            "choice when clinicians need to explain *why* a prediction was made, not just what it is."
-        )
 
-        st.divider()
-
-        # ==========================================
-        # 2. HIGH-LEVEL METRICS IMPACT
-        # ==========================================
         st.subheader("📊 High-Level Metrics Impact (SMOTE vs. Basic)")
 
         def get_delta_lr(metric):
@@ -703,11 +759,8 @@ elif page == "📊 Model Comparison":
 
         st.divider()
 
-        # ==========================================
-        # 3. VISUAL EVALUATION
-        # ==========================================
+
         st.subheader("📈 Visual Evaluation")
-        st.write("Navigate through the tabs below to explore the model visualizations.")
 
         lr_chart_tab1, lr_chart_tab2, lr_chart_tab3 = st.tabs(["📊 Metric Comparison", "🟦 Confusion Matrices", "📉 ROC Curves"])
 
@@ -724,9 +777,7 @@ elif page == "📊 Model Comparison":
 
         st.divider()
 
-        # ==========================================
-        # 4. DETAILED CLASS BREAKDOWN
-        # ==========================================
+
         st.subheader("🔍 Class-by-Class Breakdown")
 
         col_lr_basic, col_lr_smote = st.columns(2)
@@ -764,9 +815,7 @@ elif page == "📊 Model Comparison":
 
         st.divider()
 
-        # ==========================================
-        # 5. COEFFICIENT INTERPRETABILITY (LR-specific)
-        # ==========================================
+
         st.subheader("🧭 Coefficient Interpretability")
         st.write(
             "Since features are standardized before fitting, each coefficient's magnitude reflects "
@@ -799,35 +848,13 @@ elif page == "📊 Model Comparison":
                     hide_index=True,
                 )
 
-    # -------------------------------------------------------------------------
-    # TAB 3: Random Forest
-    # -------------------------------------------------------------------------
+
     with model_tabs[2]:
         st.header("Random Forest")
 
         rf_basic = rf_results_df.iloc[0]
         rf_smote = rf_results_df.iloc[1]
 
-        # ==========================================
-        # 1. EXECUTIVE SUMMARY
-        # ==========================================
-        st.info(
-            "**📝 Executive Summary & Report Conclusion:**\n\n"
-            "Both pipelines were tuned to optimise **F1-Score**, with `class_weight='balanced'` added to the "
-            "Basic Random Forest's search space so the ensemble accounts for class imbalance directly. The tuned "
-            f"**Basic Random Forest** reaches **{rf_basic['Accuracy']:.1%}** accuracy with **{rf_basic['Recall']:.1%}** "
-            f"Recall and an F1-Score of **{rf_basic['F1-Score']:.3f}** -- ahead of the **SMOTE Random Forest**, "
-            f"which trades accuracy for a smaller Recall gain (**{rf_smote['Accuracy']:.1%}** accuracy, "
-            f"**{rf_smote['Recall']:.1%}** Recall, F1-Score of **{rf_smote['F1-Score']:.3f}**). "
-            "Therefore, **Basic Random Forest** is selected as the stronger, more balanced pipeline for this "
-            "algorithm, with SMOTE provided as a reference to show the alternative imbalance-handling strategy."
-        )
-
-        st.divider()
-
-        # ==========================================
-        # 2. HIGH-LEVEL METRICS IMPACT
-        # ==========================================
         st.subheader("📊 High-Level Metrics Impact : SMOTE vs. Basic")
 
         def get_rf_delta(metric):
@@ -842,11 +869,8 @@ elif page == "📊 Model Comparison":
 
         st.divider()
 
-        # ==========================================
-        # 3. VISUAL EVALUATION
-        # ==========================================
+
         st.subheader("📈 Visual Evaluation")
-        st.write("Navigate through the tabs below to explore the model visualizations.")
 
         rf_tab1, rf_tab2, rf_tab3 = st.tabs(["📊 Metric Comparison", "🟦 Confusion Matrices", "📉 ROC Curves"])
 
@@ -863,15 +887,13 @@ elif page == "📊 Model Comparison":
 
         st.divider()
 
-        # ==========================================
-        # 4. DETAILED CLASS BREAKDOWN
-        # ==========================================
+
         st.subheader("🔍 Class-by-Class Breakdown")
 
         rf_col_basic, rf_col_smote = st.columns(2)
         rf_models_list = list(rf_results.keys())
 
-        # --- LEFT COLUMN: BASIC RANDOM FOREST ---
+
         with rf_col_basic:
             rf_res_basic = rf_results[rf_models_list[0]]
             st.markdown(f"### 🔵 {rf_models_list[0]}")
@@ -887,7 +909,7 @@ elif page == "📊 Model Comparison":
             with st.expander("⚙️ View Basic Hyperparameters"):
                 st.json(rf_res_basic['metrics']['Best Params'])
 
-        # --- RIGHT COLUMN: SMOTE RANDOM FOREST ---
+
         with rf_col_smote:
             rf_res_smote = rf_results[rf_models_list[1]]
             st.markdown(f"### 🟢 {rf_models_list[1]}")
@@ -903,13 +925,9 @@ elif page == "📊 Model Comparison":
             with st.expander("⚙️ View SMOTE Hyperparameters"):
                 st.json(rf_res_smote['metrics']['Best Params'])
 
-        # ==========================================
-        # 5. FEATURE IMPORTANCE (Permutation)
-        # ==========================================
+
         st.divider()
         st.subheader("🧭 Permutation Feature Importance")
-        st.write("Permutation importance measures how much each feature contributes to the model's predictive performance. "
-                 "A higher importance score indicates that the feature is more influential in determining the model's predictions.")
 
         rf_perm_basic, rf_perm_smote = st.tabs([f"🔵 {rf_models_list[0]}", f"🟢 {rf_models_list[1]}"])
 
@@ -937,37 +955,13 @@ elif page == "📊 Model Comparison":
                     hide_index=True,
                 )
 
-    # -------------------------------------------------------------------------
-    # TAB 4: Decision Tree (Placeholder)
-    # -------------------------------------------------------------------------
+
     with model_tabs[3]:
         st.header("Decision Tree")
 
         dt_basic = dt_results_df.iloc[0]
         dt_smote = dt_results_df.iloc[1]
 
-        # ==========================================
-        # 1. EXECUTIVE SUMMARY
-        # ==========================================
-        st.info(
-            "**📝 Executive Summary & Report Conclusion:**\n\n"
-            f"The **Basic Decision Tree** reaches "
-            f"**{dt_basic['Accuracy']:.1%}** accuracy simply by predicting nearly everyone is healthy but giving a very low Recall of only **{dt_basic['Recall']:.1%}**. This "
-            "means almost every patient is classified as *No Disease*, making it useless as a medical diagnostic tool.\n\n"
-            f"Using **SMOTE** helps the model handle the imbalanced data better. Recall increases to **{dt_smote['Recall']:.1%}** "
-            f"({dt_smote['Recall'] - dt_basic['Recall']:+.1%}), while ROC-AUC is **{dt_smote['ROC-AUC']:.3f}** "
-            f"({dt_smote['ROC-AUC'] - dt_basic['ROC-AUC']:+.3f}). However, accuracy decreases to **{dt_smote['Accuracy']:.1%}**.\n\n"
-            "**Conclusion:** For medical screening, finding patients with heart disease is more important than having high accuracy, "
-            "so the **SMOTE-tuned Decision Tree** is the recommended pipeline for this algorithm. The Basic "
-            "tree is retained only as a baseline that demonstrates how misleading raw accuracy becomes "
-            "under class imbalance."
-        )
-
-        st.divider()
-
-        # ==========================================
-        # 2. HIGH-LEVEL METRICS IMPACT
-        # ==========================================
         st.subheader("📊 High-Level Metrics Impact : SMOTE vs. Basic")
 
         def get_dt_delta(metric):
@@ -982,11 +976,8 @@ elif page == "📊 Model Comparison":
 
         st.divider()
 
-        # ==========================================
-        # 3. VISUAL EVALUATION
-        # ==========================================
+
         st.subheader("📈 Visual Evaluation")
-        st.write("Navigate through the tabs below to explore the model visualizations.")
 
         dt_tab1, dt_tab2, dt_tab3 = st.tabs(["📊 Metric Comparison", "🟦 Confusion Matrices", "📉 ROC Curves"])
 
@@ -1003,15 +994,13 @@ elif page == "📊 Model Comparison":
 
         st.divider()
 
-        # ==========================================
-        # 4. DETAILED CLASS BREAKDOWN
-        # ==========================================
+
         st.subheader("🔍 Class-by-Class Breakdown")
 
         dt_col_basic, dt_col_smote = st.columns(2)
         dt_models_list = list(dt_results.keys())
 
-        # --- LEFT COLUMN: BASIC DECISION TREE ---
+
         with dt_col_basic:
             dt_res_basic = dt_results[dt_models_list[0]]
             st.markdown(f"### 🔵 {dt_models_list[0]}")
@@ -1027,7 +1016,7 @@ elif page == "📊 Model Comparison":
             with st.expander("⚙️ View Basic Hyperparameters"):
                 st.json(dt_res_basic['metrics']['Best Params'])
 
-        # --- RIGHT COLUMN: SMOTE DECISION TREE ---
+
         with dt_col_smote:
             dt_res_smote = dt_results[dt_models_list[1]]
             st.markdown(f"### 🟢 {dt_models_list[1]}")
@@ -1043,13 +1032,9 @@ elif page == "📊 Model Comparison":
             with st.expander("⚙️ View SMOTE Hyperparameters"):
                 st.json(dt_res_smote['metrics']['Best Params'])
 
-        # ==========================================
-        # 5. FEATURE IMPORTANCE (Permutation)
-        # ==========================================
+
         st.divider()
         st.subheader("🧭 Permutation Feature Importance")
-        st.write("Permutation importance measures how much each feature contributes to the model's predictive performance. "
-                 "A higher importance score indicates that the feature is more influential in determining the model's predictions.")
 
         dt_perm_basic, dt_perm_smote = st.tabs([f"🔵 {dt_models_list[0]}", f"🟢 {dt_models_list[1]}"])
 
