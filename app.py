@@ -8,6 +8,7 @@ import plotly.graph_objects as go
 import knn as km
 import decision_tree as dtm
 import logistic_regression as lgm
+import random_forest as rfm
 
 st.set_page_config(page_title="Heart Disease Risk", layout="wide", page_icon="\u2764\ufe0f")
 
@@ -78,6 +79,23 @@ def train_logreg_models(X, y):
     return {
         "X_train": X_train, "X_test": X_test, "y_train": y_train, "y_test": y_test,
         "results": {"1. Basic Logistic Regression": basic, "2. SMOTE Logistic Regression": smote},
+    }
+
+
+@st.cache_resource(show_spinner="Training Basic & SMOTE Random Forest (grid search, one-time)...")
+def train_random_forests(X, y):
+    X_train, X_test, y_train, y_test = rfm.get_70_30_split(X, y)
+    basic = rfm.tune_and_evaluate(
+        rfm.build_basic_pipeline(), rfm.BASIC_PARAM_GRID,
+        X_train, X_test, y_train, y_test, "1. Basic Random Forest",
+    )
+    smote = rfm.tune_and_evaluate(
+        rfm.build_smote_pipeline(), rfm.SMOTE_PARAM_GRID,
+        X_train, X_test, y_train, y_test, "2. SMOTE Random Forest",
+    )
+    return {
+        "X_train": X_train, "X_test": X_test, "y_train": y_train, "y_test": y_test,
+        "results": {"1. Basic Random Forest": basic, "2. SMOTE Random Forest": smote},
     }
 
 
@@ -170,10 +188,16 @@ results_lr = trained_lr["results"]
 y_test_lr = trained_lr["y_test"]
 results_df_lr = pd.DataFrame([res["metrics"] for res in results_lr.values()])
 
+rf_trained = train_random_forests(X, y)
+rf_results = rf_trained["results"]
+rf_X_test = rf_trained["X_test"]
+rf_y_test = rf_trained["y_test"]
+rf_results_df = pd.DataFrame([res["metrics"] for res in rf_results.values()])
+
 # Combined view across all trained model families, used by the Home predictor
 # and the dataset overview so they reflect the current best model overall.
-all_results = {**results, **results_lr, **dt_results}
-all_results_df = pd.concat([results_df, results_df_lr, dt_results_df], ignore_index=True)
+all_results = {**results, **results_lr, **dt_results, **rf_results}
+all_results_df = pd.concat([results_df, results_df_lr, dt_results_df, rf_results_df], ignore_index=True)
 
 # --- PREFETCH MAGIC HAPPENS HERE ---
 @st.cache_resource(show_spinner="Prefetching EDA Plots (One-time setup)...")
@@ -776,11 +800,142 @@ elif page == "📊 Model Comparison":
                 )
 
     # -------------------------------------------------------------------------
-    # TAB 3: Random Forest (Placeholder)
+    # TAB 3: Random Forest
     # -------------------------------------------------------------------------
     with model_tabs[2]:
         st.header("Random Forest")
-        st.info("Space reserved for Basic vs. SMOTE Random Forest. \n\n**(Major Strength: Pure Predictive Power and Feature Importance)**")
+
+        rf_basic = rf_results_df.iloc[0]
+        rf_smote = rf_results_df.iloc[1]
+
+        # ==========================================
+        # 1. EXECUTIVE SUMMARY
+        # ==========================================
+        st.info(
+            "**📝 Executive Summary & Report Conclusion:**\n\n"
+            "Both pipelines were tuned to optimise **F1-Score**, with `class_weight='balanced'` added to the "
+            "Basic Random Forest's search space so the ensemble accounts for class imbalance directly. The tuned "
+            f"**Basic Random Forest** reaches **{rf_basic['Accuracy']:.1%}** accuracy with **{rf_basic['Recall']:.1%}** "
+            f"Recall and an F1-Score of **{rf_basic['F1-Score']:.3f}** -- ahead of the **SMOTE Random Forest**, "
+            f"which trades accuracy for a smaller Recall gain (**{rf_smote['Accuracy']:.1%}** accuracy, "
+            f"**{rf_smote['Recall']:.1%}** Recall, F1-Score of **{rf_smote['F1-Score']:.3f}**). "
+            "Therefore, **Basic Random Forest** is selected as the stronger, more balanced pipeline for this "
+            "algorithm, with SMOTE provided as a reference to show the alternative imbalance-handling strategy."
+        )
+
+        st.divider()
+
+        # ==========================================
+        # 2. HIGH-LEVEL METRICS IMPACT
+        # ==========================================
+        st.subheader("📊 High-Level Metrics Impact : SMOTE vs. Basic")
+
+        def get_rf_delta(metric):
+            return float(rf_smote[metric] - rf_basic[metric])
+
+        r1, r2, r3, r4, r5 = st.columns(5)
+        r1.metric("Accuracy", f"{rf_smote['Accuracy']:.4f}", f"{get_rf_delta('Accuracy'):.4f}")
+        r2.metric("Precision", f"{rf_smote['Precision']:.4f}", f"{get_rf_delta('Precision'):.4f}")
+        r3.metric("Recall", f"{rf_smote['Recall']:.4f}", f"{get_rf_delta('Recall'):.4f}")
+        r4.metric("F1-Score", f"{rf_smote['F1-Score']:.4f}", f"{get_rf_delta('F1-Score'):.4f}")
+        r5.metric("ROC-AUC", f"{rf_smote['ROC-AUC']:.4f}", f"{get_rf_delta('ROC-AUC'):.4f}")
+
+        st.divider()
+
+        # ==========================================
+        # 3. VISUAL EVALUATION
+        # ==========================================
+        st.subheader("📈 Visual Evaluation")
+        st.write("Navigate through the tabs below to explore the model visualizations.")
+
+        rf_tab1, rf_tab2, rf_tab3 = st.tabs(["📊 Metric Comparison", "🟦 Confusion Matrices", "📉 ROC Curves"])
+
+        with rf_tab1:
+            st.pyplot(rfm.plot_metric_comparison(rf_results_df))
+
+        with rf_tab2:
+            st.pyplot(rfm.plot_confusion_matrices(rf_results))
+
+        with rf_tab3:
+            rf_roc1, rf_roc2, rf_roc3 = st.columns([1, 2, 1])
+            with rf_roc2:
+                st.pyplot(rfm.plot_roc_curves(rf_results, rf_y_test))
+
+        st.divider()
+
+        # ==========================================
+        # 4. DETAILED CLASS BREAKDOWN
+        # ==========================================
+        st.subheader("🔍 Class-by-Class Breakdown")
+
+        rf_col_basic, rf_col_smote = st.columns(2)
+        rf_models_list = list(rf_results.keys())
+
+        # --- LEFT COLUMN: BASIC RANDOM FOREST ---
+        with rf_col_basic:
+            rf_res_basic = rf_results[rf_models_list[0]]
+            st.markdown(f"### 🔵 {rf_models_list[0]}")
+            st.info(f"**🎯 Overall Accuracy:** {rf_res_basic['metrics']['Accuracy']:.2%} &nbsp; | &nbsp; **📈 ROC-AUC:** {rf_res_basic['metrics']['ROC-AUC']:.2%}")
+
+            rf_report_basic = rfm.classification_report(rf_y_test, rf_res_basic["y_pred"], output_dict=True, zero_division=0)
+            rf_df_rep_basic = pd.DataFrame(rf_report_basic).transpose()
+            rf_df_rep_basic.rename(index={'0': 'No Disease (0)', '1': 'Disease (1)', 'macro avg': 'Macro Avg', 'weighted avg': 'Weighted Avg'}, inplace=True)
+            rf_df_rep_basic = rf_df_rep_basic.drop(index=['accuracy'], errors='ignore').drop(columns=['support'], errors='ignore')
+
+            st.dataframe(rf_df_rep_basic.style.background_gradient(cmap='Blues').format("{:.3f}"), use_container_width=True)
+
+            with st.expander("⚙️ View Basic Hyperparameters"):
+                st.json(rf_res_basic['metrics']['Best Params'])
+
+        # --- RIGHT COLUMN: SMOTE RANDOM FOREST ---
+        with rf_col_smote:
+            rf_res_smote = rf_results[rf_models_list[1]]
+            st.markdown(f"### 🟢 {rf_models_list[1]}")
+            st.success(f"**🎯 Overall Accuracy:** {rf_res_smote['metrics']['Accuracy']:.2%} &nbsp; | &nbsp; **📈 ROC-AUC:** {rf_res_smote['metrics']['ROC-AUC']:.2%}")
+
+            rf_report_smote = rfm.classification_report(rf_y_test, rf_res_smote["y_pred"], output_dict=True, zero_division=0)
+            rf_df_rep_smote = pd.DataFrame(rf_report_smote).transpose()
+            rf_df_rep_smote.rename(index={'0': 'No Disease (0)', '1': 'Disease (1)', 'macro avg': 'Macro Avg', 'weighted avg': 'Weighted Avg'}, inplace=True)
+            rf_df_rep_smote = rf_df_rep_smote.drop(index=['accuracy'], errors='ignore').drop(columns=['support'], errors='ignore')
+
+            st.dataframe(rf_df_rep_smote.style.background_gradient(cmap='Greens').format("{:.3f}"), use_container_width=True)
+
+            with st.expander("⚙️ View SMOTE Hyperparameters"):
+                st.json(rf_res_smote['metrics']['Best Params'])
+
+        # ==========================================
+        # 5. FEATURE IMPORTANCE (Permutation)
+        # ==========================================
+        st.divider()
+        st.subheader("🧭 Permutation Feature Importance")
+        st.write("Permutation importance measures how much each feature contributes to the model's predictive performance. "
+                 "A higher importance score indicates that the feature is more influential in determining the model's predictions.")
+
+        rf_perm_basic, rf_perm_smote = st.tabs([f"🔵 {rf_models_list[0]}", f"🟢 {rf_models_list[1]}"])
+
+        with rf_perm_basic:
+            rf_imp_basic = rfm.get_permutation_importance(rf_res_basic["best_model"], rf_X_test, rf_y_test)
+            rf_perm_col1, rf_perm_col2 = st.columns([1.3, 1])
+            with rf_perm_col1:
+                st.pyplot(rfm.plot_permutation_importance(rf_imp_basic, "Basic Random Forest -- All Features"))
+            with rf_perm_col2:
+                st.dataframe(
+                    rf_imp_basic[["Rank", "Feature", "Importance"]].style.format({"Importance": "{:.4f}"}),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+        with rf_perm_smote:
+            rf_imp_smote = rfm.get_permutation_importance(rf_res_smote["best_model"], rf_X_test, rf_y_test)
+            rf_perm_col3, rf_perm_col4 = st.columns([1.3, 1])
+            with rf_perm_col3:
+                st.pyplot(rfm.plot_permutation_importance(rf_imp_smote, "SMOTE Random Forest -- All Features"))
+            with rf_perm_col4:
+                st.dataframe(
+                    rf_imp_smote[["Rank", "Feature", "Importance"]].style.format({"Importance": "{:.4f}"}),
+                    use_container_width=True,
+                    hide_index=True,
+                )
 
     # -------------------------------------------------------------------------
     # TAB 4: Decision Tree (Placeholder)
