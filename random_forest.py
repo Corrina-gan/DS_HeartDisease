@@ -23,13 +23,14 @@ from data_preprocessing import run_pipeline, RANDOM_STATE
 TEST_SIZE = 0.30
 OUTPUT_DIR = "outputs"
 
-RF_SCORING = "f1"
+BASIC_SCORING = "accuracy"
+SMOTE_SCORING = "f1"
 
 BASIC_PARAM_GRID = {
     "rf__n_estimators": [100, 300],
-    "rf__max_depth": [5, 8, None],
-    "rf__min_samples_leaf": [1, 5, 10],
-    "rf__class_weight": ["balanced", None],
+    "rf__max_depth": [None],
+    "rf__min_samples_leaf": [5, 10],
+    "rf__class_weight": ["balanced"],
 }
 SMOTE_PARAM_GRID = {
     "rf__n_estimators": [100, 300],
@@ -84,7 +85,7 @@ def build_smote_pipeline():
 # Tune + evaluate
 # --------------------------------------------------------------------------
 
-def tune_and_evaluate(pipeline, param_grid, X_train, X_test, y_train, y_test, model_name, cv=5, scoring=RF_SCORING):
+def tune_and_evaluate(pipeline, param_grid, X_train, X_test, y_train, y_test, model_name, cv=5, scoring=SMOTE_SCORING):
     grid = GridSearchCV(
         pipeline,
         param_grid,
@@ -234,20 +235,20 @@ def run_random_forest_experiments(path="heart_disease.csv", save_outputs=True, s
     basic_results = tune_and_evaluate(
         build_basic_pipeline(), BASIC_PARAM_GRID,
         X_train, X_test, y_train, y_test, "1. Basic Random Forest",
-        scoring=RF_SCORING,
+        scoring=BASIC_SCORING,
     )
     print(f"Best Params: {basic_results['metrics']['Best Params']}")
-    print(f"Best CV {RF_SCORING.upper()}: {basic_results['metrics'][f'CV {RF_SCORING.upper()} (best)']}")
+    print(f"Best CV {BASIC_SCORING.upper()}: {basic_results['metrics'][f'CV {BASIC_SCORING.upper()} (best)']}")
     print(basic_results["classification_report"])
 
     section("2. SMOTE Random Forest (70/30 split)")
     smote_results = tune_and_evaluate(
         build_smote_pipeline(), SMOTE_PARAM_GRID,
         X_train, X_test, y_train, y_test, "2. SMOTE Random Forest",
-        scoring=RF_SCORING,
+        scoring=SMOTE_SCORING,
     )
     print(f"Best Params: {smote_results['metrics']['Best Params']}")
-    print(f"Best CV {RF_SCORING.upper()}: {smote_results['metrics'][f'CV {RF_SCORING.upper()} (best)']}")
+    print(f"Best CV {SMOTE_SCORING.upper()}: {smote_results['metrics'][f'CV {SMOTE_SCORING.upper()} (best)']}")
     print(smote_results["classification_report"])
 
     all_results = {

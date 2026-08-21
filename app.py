@@ -119,6 +119,7 @@ def train_rf_basic(X, y):
         result = rfm.tune_and_evaluate(
             rfm.build_basic_pipeline(), rfm.BASIC_PARAM_GRID,
             X_train, X_test, y_train, y_test, "1. Basic Random Forest",
+            scoring=rfm.BASIC_SCORING,
         )
         return {"X_test": X_test, "y_test": y_test, "result": result}
     return load_or_train("rf_basic", _compute, X, y)
@@ -131,6 +132,7 @@ def train_rf_smote(X, y):
         result = rfm.tune_and_evaluate(
             rfm.build_smote_pipeline(), rfm.SMOTE_PARAM_GRID,
             X_train, X_test, y_train, y_test, "2. SMOTE Random Forest",
+            scoring=rfm.SMOTE_SCORING,
         )
         return {"X_test": X_test, "y_test": y_test, "result": result}
     return load_or_train("rf_smote", _compute, X, y)
