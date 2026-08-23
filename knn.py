@@ -49,9 +49,6 @@ def section(title):
 # --------------------------------------------------------------------------
 
 def get_70_30_split(X, y, random_state=RANDOM_STATE):
-    """Stratified 70/30 train-test split (independent of the 80/20 split
-    produced by data_preprocessing.split_and_scale, which other models may
-    still use)."""
     return train_test_split(
         X, y, test_size=TEST_SIZE, random_state=random_state, stratify=y
     )
@@ -140,7 +137,6 @@ def get_permutation_importance(model, X_test, y_test):
     return imp_df.reset_index()
 
 def plot_permutation_importance(imp_df, title):
-    """Plots the top 15 features based on permutation importance."""
     fig, ax = plt.subplots(figsize=(8, 6))
     top_df = imp_df.head(15)
     

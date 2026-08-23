@@ -23,14 +23,14 @@ from data_preprocessing import run_pipeline, RANDOM_STATE
 TEST_SIZE = 0.30
 OUTPUT_DIR = "outputs"
 
-BASIC_SCORING = "accuracy"
+BASIC_SCORING = "f1"
 SMOTE_SCORING = "f1"
 
 BASIC_PARAM_GRID = {
     "rf__n_estimators": [100, 300],
     "rf__max_depth": [None],
     "rf__min_samples_leaf": [5, 10],
-    "rf__class_weight": ["balanced"],
+    "rf__class_weight": [None, "balanced", "balanced_subsample"],
 }
 SMOTE_PARAM_GRID = {
     "rf__n_estimators": [100, 300],

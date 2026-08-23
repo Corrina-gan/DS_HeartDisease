@@ -1,8 +1,18 @@
 import os
 
 import joblib
+import numpy as np
 import streamlit as st
 import pandas as pd
+import matplotlib.pyplot as plt
+from sklearn.model_selection import cross_val_predict, StratifiedKFold
+from sklearn.metrics import (
+    accuracy_score, precision_score, recall_score, f1_score,
+    roc_auc_score, precision_recall_curve,
+)
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.pipeline import Pipeline
 
 import data_preprocessing as dp
 import data_visualization as dv
@@ -119,7 +129,6 @@ def train_rf_basic(X, y):
         result = rfm.tune_and_evaluate(
             rfm.build_basic_pipeline(), rfm.BASIC_PARAM_GRID,
             X_train, X_test, y_train, y_test, "1. Basic Random Forest",
-            scoring=rfm.BASIC_SCORING,
         )
         return {"X_test": X_test, "y_test": y_test, "result": result}
     return load_or_train("rf_basic", _compute, X, y)
@@ -132,7 +141,6 @@ def train_rf_smote(X, y):
         result = rfm.tune_and_evaluate(
             rfm.build_smote_pipeline(), rfm.SMOTE_PARAM_GRID,
             X_train, X_test, y_train, y_test, "2. SMOTE Random Forest",
-            scoring=rfm.SMOTE_SCORING,
         )
         return {"X_test": X_test, "y_test": y_test, "result": result}
     return load_or_train("rf_smote", _compute, X, y)
@@ -146,6 +154,151 @@ def run_training_jobs(label, jobs):
             status.write(f"✅ {name} ready")
         status.update(label=f"{label} — done", state="complete")
     return outputs
+
+
+ROBUSTNESS_CV = StratifiedKFold(n_splits=5, shuffle=True, random_state=dp.RANDOM_STATE)
+
+
+def _eval_pipeline(label, scoring_label, pipeline, param_grid, scoring, X_train, X_test, y_train, y_test):
+    from sklearn.model_selection import GridSearchCV
+    grid = GridSearchCV(pipeline, param_grid, cv=ROBUSTNESS_CV, scoring=scoring, n_jobs=-1, verbose=0)
+    grid.fit(X_train, y_train)
+    best = grid.best_estimator_
+    y_pred = best.predict(X_test)
+    y_prob = best.predict_proba(X_test)[:, 1]
+    row = {
+        "Check": label,
+        "Scoring": scoring_label,
+        "Accuracy": round(accuracy_score(y_test, y_pred), 4),
+        "Precision": round(precision_score(y_test, y_pred, zero_division=0), 4),
+        "Recall": round(recall_score(y_test, y_pred, zero_division=0), 4),
+        "F1-Score": round(f1_score(y_test, y_pred, zero_division=0), 4),
+        "ROC-AUC": round(roc_auc_score(y_test, y_prob), 4),
+    }
+    return row, best, y_prob
+
+
+def _best_threshold_from_cv(pipeline, X_train, y_train):
+    oof_proba = cross_val_predict(pipeline, X_train, y_train, cv=ROBUSTNESS_CV, method="predict_proba")[:, 1]
+    precisions, recalls, thresholds = precision_recall_curve(y_train, oof_proba)
+    f1s = 2 * precisions * recalls / (precisions + recalls + 1e-12)
+    return thresholds[np.nanargmax(f1s[:-1])]
+
+
+def _add_interaction_terms(X):
+    X = X.copy()
+    X["Age_x_BMI"] = X["Age"] * X["BMI"]
+    X["Cholesterol_x_BloodPressure"] = X["Cholesterol Level"] * X["Blood Pressure"]
+    X["Sleep_x_Stress"] = X["Sleep Hours"] * X["Stress Level"]
+    X["Triglyceride_x_FastingBloodSugar"] = X["Triglyceride Level"] * X["Fasting Blood Sugar"]
+    X["CRP_x_Homocysteine"] = X["CRP Level"] * X["Homocysteine Level"]
+    return X
+
+
+@st.cache_resource(show_spinner=False)
+def run_robustness_checks(X, y):
+    from sklearn.model_selection import train_test_split
+    X_eng = _add_interaction_terms(X)
+
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.30, random_state=dp.RANDOM_STATE, stratify=y)
+    X_train_eng, X_test_eng, y_train_eng, y_test_eng = train_test_split(X_eng, y, test_size=0.30, random_state=dp.RANDOM_STATE, stratify=y)
+
+    dt_grid_current = {"dt__criterion": ["gini", "entropy"], "dt__max_depth": [3, 5, 8], "dt__min_samples_leaf": [10, 25, 50]}
+    dt_grid_widened = {"dt__criterion": ["gini", "entropy"], "dt__max_depth": [3, 5, 8, 12, None], "dt__min_samples_leaf": [5, 10, 25, 50], "dt__min_samples_split": [2, 10, 20], "dt__class_weight": [None, "balanced"]}
+    rf_grid_current = {"rf__n_estimators": [100, 300], "rf__min_samples_leaf": [5, 10], "rf__class_weight": ["balanced"]}
+    rf_grid_free_weight = {"rf__n_estimators": [100, 300], "rf__min_samples_leaf": [5, 10], "rf__class_weight": [None, "balanced"]}
+
+    rows = []
+    with st.status("Running robustness checks", expanded=True) as status:
+        for scoring in ["f1", "accuracy", "roc_auc", "recall"]:
+            row, _, _ = _eval_pipeline("Decision Tree", f"scoring={scoring}", Pipeline([("dt", DecisionTreeClassifier(random_state=dp.RANDOM_STATE))]), dt_grid_current, scoring, X_train, X_test, y_train, y_test)
+            rows.append(row)
+            row, _, _ = _eval_pipeline("Random Forest", f"scoring={scoring}", Pipeline([("rf", RandomForestClassifier(random_state=dp.RANDOM_STATE))]), rf_grid_current, scoring, X_train, X_test, y_train, y_test)
+            rows.append(row)
+            status.write(f"✅ scoring={scoring} done")
+
+        row, dt_model, dt_prob = _eval_pipeline("Decision Tree", "f1 (baseline)", Pipeline([("dt", DecisionTreeClassifier(random_state=dp.RANDOM_STATE))]), dt_grid_current, "f1", X_train, X_test, y_train, y_test)
+        tuned_t = _best_threshold_from_cv(dt_model, X_train, y_train)
+        y_pred_t = (dt_prob >= tuned_t).astype(int)
+        rows.append({
+            "Check": "Decision Tree", "Scoring": f"f1 + threshold tuned (t={tuned_t:.3f})",
+            "Accuracy": round(accuracy_score(y_test, y_pred_t), 4), "Precision": round(precision_score(y_test, y_pred_t, zero_division=0), 4),
+            "Recall": round(recall_score(y_test, y_pred_t, zero_division=0), 4), "F1-Score": round(f1_score(y_test, y_pred_t, zero_division=0), 4),
+            "ROC-AUC": round(roc_auc_score(y_test, dt_prob), 4),
+        })
+        status.write("✅ threshold tuning done")
+
+        row, _, _ = _eval_pipeline("Decision Tree", "widened grid (class_weight incl.)", Pipeline([("dt", DecisionTreeClassifier(random_state=dp.RANDOM_STATE))]), dt_grid_widened, "f1", X_train, X_test, y_train, y_test)
+        rows.append(row)
+        row, _, _ = _eval_pipeline("Random Forest", "class_weight=None allowed", Pipeline([("rf", RandomForestClassifier(random_state=dp.RANDOM_STATE))]), rf_grid_free_weight, "f1", X_train, X_test, y_train, y_test)
+        rows.append(row)
+        status.write("✅ widened grids done")
+
+        row, _, _ = _eval_pipeline("Decision Tree", "+ interaction features", Pipeline([("dt", DecisionTreeClassifier(random_state=dp.RANDOM_STATE))]), dt_grid_current, "f1", X_train_eng, X_test_eng, y_train_eng, y_test_eng)
+        rows.append(row)
+        row, _, _ = _eval_pipeline("Random Forest", "+ interaction features", Pipeline([("rf", RandomForestClassifier(random_state=dp.RANDOM_STATE))]), rf_grid_current, "f1", X_train_eng, X_test_eng, y_train_eng, y_test_eng)
+        rows.append(row)
+        status.write("✅ feature engineering done")
+        status.update(label="Robustness checks — done", state="complete")
+
+    return pd.DataFrame(rows)
+
+
+def plot_robustness_roc_auc(df):
+    fig, ax = plt.subplots(figsize=(9, max(4, 0.35 * len(df))))
+    labels = df["Check"] + " — " + df["Scoring"]
+    colors = ["#c44e52" if v < 0.5 else "#4c72b0" for v in df["ROC-AUC"]]
+    ax.barh(labels, df["ROC-AUC"], color=colors)
+    ax.axvline(0.5, color="black", linestyle="--", linewidth=1, label="Chance level (0.500)")
+    ax.set_xlabel("ROC-AUC")
+    ax.set_title("ROC-AUC Across All Robustness Checks")
+    ax.legend(loc="lower right")
+    plt.tight_layout()
+    return fig
+
+
+def plot_best_models_rocauc(best_df):
+    """ROC-AUC of each algorithm's selected (Basic vs SMOTE winner) pipeline,
+    plotted live against the chance level. Mirrors plot_robustness_roc_auc
+    above but for the four-algorithm comparison shown on the Model
+    Comparison page."""
+    fig, ax = plt.subplots(figsize=(7, 5))
+    order = best_df.sort_values("ROC-AUC", ascending=False)
+    colors = ["#c44e52" if v < 0.5 else "#4c72b0" for v in order["ROC-AUC"]]
+    bars = ax.bar(order["Model"], order["ROC-AUC"], color=colors)
+    ax.bar_label(bars, fmt="%.3f", fontsize=9, padding=2)
+    ax.axhline(0.5, color="black", linestyle="--", linewidth=1, label="Chance level (0.500)")
+    ax.set_ylim(0, max(0.65, order["ROC-AUC"].max() + 0.1))
+    ax.set_ylabel("ROC-AUC")
+    ax.set_title("ROC-AUC of Each Algorithm's Selected Pipeline")
+    ax.legend(loc="upper right")
+    plt.xticks(rotation=10)
+    plt.tight_layout()
+    return fig
+
+
+def train_all_models(X, y):
+    all_jobs = {
+        "KNN": (train_knn_basic, X, y),
+        "Decision Tree": (train_dt_basic, X, y),
+        "Logistic Regression": (train_lr_basic, X, y),
+        "Random Forest": (train_rf_basic, X, y),
+        "KNN (SMOTE)": (train_knn_smote, X, y),
+        "Decision Tree (SMOTE)": (train_dt_smote, X, y),
+        "Logistic Regression (SMOTE)": (train_lr_smote, X, y),
+        "Random Forest (SMOTE)": (train_rf_smote, X, y),
+    }
+    return run_training_jobs("Training models (Basic + SMOTE)", all_jobs)
+
+
+def pick_best(basic_result, smote_result):
+    basic_auc = basic_result["metrics"]["ROC-AUC"]
+    smote_auc = smote_result["metrics"]["ROC-AUC"]
+    if abs(basic_auc - smote_auc) > 1e-9:
+        return (basic_result, "Basic") if basic_auc > smote_auc else (smote_result, "SMOTE")
+    basic_acc = basic_result["metrics"]["Accuracy"]
+    smote_acc = smote_result["metrics"]["Accuracy"]
+    return (basic_result, "Basic") if basic_acc >= smote_acc else (smote_result, "SMOTE")
 
 
 with st.sidebar:
@@ -202,6 +355,7 @@ with st.sidebar:
                 "🔍 EDA",
                 "🧹 Preprocessing",
                 "⚖️ Basic vs SMOTE",
+                "🔬 Robustness Checks",
             ],
             index=None,
             label_visibility="collapsed",
@@ -226,37 +380,53 @@ le_target = pipeline_data["le_target"]
 missing_treatment_summary = pipeline_data["missing_treatment_summary"]
 target_mapping = dict(zip(le_target.classes_, le_target.transform(le_target.classes_)))
 
-basic_jobs = {
-    "KNN": (train_knn_basic, X, y),
-    "Decision Tree": (train_dt_basic, X, y),
-    "Logistic Regression": (train_lr_basic, X, y),
-    "Random Forest": (train_rf_basic, X, y),
-}
-basic_trained = run_training_jobs("Training Basic models", basic_jobs)
+if page in ("🏠 Home (Predict & Overview)", "📊 Model Comparison"):
+    all_trained = train_all_models(X, y)
 
-knn_basic_data = basic_trained["KNN"]
-X_test, y_test = knn_basic_data["X_test"], knn_basic_data["y_test"]
+    knn_basic_data = all_trained["KNN"]
+    X_test, y_test = knn_basic_data["X_test"], knn_basic_data["y_test"]
+    knn_smote_data = all_trained["KNN (SMOTE)"]
 
-dt_basic_data = basic_trained["Decision Tree"]
-dt_X_test, dt_y_test = dt_basic_data["X_test"], dt_basic_data["y_test"]
+    dt_basic_data = all_trained["Decision Tree"]
+    dt_X_test, dt_y_test = dt_basic_data["X_test"], dt_basic_data["y_test"]
+    dt_smote_data = all_trained["Decision Tree (SMOTE)"]
 
-lr_basic_data = basic_trained["Logistic Regression"]
-y_test_lr = lr_basic_data["y_test"]
+    lr_basic_data = all_trained["Logistic Regression"]
+    y_test_lr = lr_basic_data["y_test"]
+    lr_smote_data = all_trained["Logistic Regression (SMOTE)"]
 
-rf_basic_data = basic_trained["Random Forest"]
-rf_X_test, rf_y_test = rf_basic_data["X_test"], rf_basic_data["y_test"]
+    rf_basic_data = all_trained["Random Forest"]
+    rf_X_test, rf_y_test = rf_basic_data["X_test"], rf_basic_data["y_test"]
+    rf_smote_data = all_trained["Random Forest (SMOTE)"]
 
-basic_results = {
-    "KNN": knn_basic_data["result"],
-    "Logistic Regression": lr_basic_data["result"],
-    "Random Forest": rf_basic_data["result"],
-    "Decision Tree": dt_basic_data["result"],
-}
-basic_metric_cols = ["Accuracy", "Precision", "Recall", "F1-Score", "ROC-AUC"]
-basic_df = pd.DataFrame([{**res["metrics"], "Model": name} for name, res in basic_results.items()])
+    basic_results = {
+        "KNN": knn_basic_data["result"],
+        "Logistic Regression": lr_basic_data["result"],
+        "Random Forest": rf_basic_data["result"],
+        "Decision Tree": dt_basic_data["result"],
+    }
+    smote_results = {
+        "KNN": knn_smote_data["result"],
+        "Logistic Regression": lr_smote_data["result"],
+        "Random Forest": rf_smote_data["result"],
+        "Decision Tree": dt_smote_data["result"],
+    }
 
-all_results = basic_results
-all_results_df = basic_df
+    best_results = {}
+    best_pipeline_used = {}
+    for name in basic_results:
+        result, used = pick_best(basic_results[name], smote_results[name])
+        best_results[name] = result
+        best_pipeline_used[name] = used
+
+    best_metric_cols = ["Accuracy", "Precision", "Recall", "F1-Score", "ROC-AUC"]
+    best_df = pd.DataFrame([
+        {**res["metrics"], "Model": name, "Pipeline": best_pipeline_used[name]}
+        for name, res in best_results.items()
+    ])
+
+    all_results = best_results
+    all_results_df = best_df
 
 
 @st.cache_resource(show_spinner="Prefetching EDA Plots (One-time setup)...")
@@ -287,6 +457,7 @@ def prefetch_stats(df, num_cols, cat_cols, X_df, y_ser):
 
 if page == "🏠 Home (Predict & Overview)":
     st.title("❤️ Heart Disease Risk Dashboard")
+    st.markdown("Use the calculator below to assess patient risk, or scroll down to view the dataset overview.")
 
 
     st.header("🩺 Live Risk Predictor")
@@ -370,7 +541,7 @@ if page == "🏠 Home (Predict & Overview)":
         with g_col2:
             st.plotly_chart(fig_gauge, use_container_width=True)
 
-        st.caption(f"Powered by {model_choice}")
+        st.caption(f"Powered by {model_choice} ({best_pipeline_used[model_choice]} pipeline)")
 
 
     st.divider()
@@ -405,6 +576,7 @@ if page == "🏠 Home (Predict & Overview)":
 
 elif page == "🔍 EDA":
     st.title("🔍 Exploratory Data Analysis")
+    st.markdown("Explore the underlying patterns in the raw dataset before any cleaning or encoding.")
 
     eda_figs = prefetch_eda_plots(raw_df, numeric_cols, categorical_cols)
     outlier_df, table_numeric, table_categorical, fig_assoc, mcar_df, fig_mcar, fig_corr, anova_df, chi2_df = prefetch_stats(raw_df, numeric_cols, categorical_cols, X, y)
@@ -483,6 +655,7 @@ elif page == "🧹 Preprocessing":
 
         st.divider()
         st.subheader("MCAR Test: Alcohol Consumption")
+        st.markdown("Testing if missing 'Alcohol Consumption' data relates to other variables (Missing Completely At Random).")
         st.pyplot(fig_mcar)
 
     with prep_tab2:
@@ -563,25 +736,36 @@ elif page == "\U0001F52E Predict":
 
 elif page == "📊 Model Comparison":
     st.title("📊 Model Comparison")
-    st.subheader("🏆 Algorithm Evaluation")
+
+    st.subheader("🏆 Metrics at a Glance")
     st.dataframe(
-        basic_df[["Model"] + basic_metric_cols].style
-            .highlight_max(subset=basic_metric_cols, color="#d4edda")
-            .format({c: "{:.4f}" for c in basic_metric_cols}),
+        best_df[["Model", "Pipeline"] + best_metric_cols].style
+            .highlight_max(subset=best_metric_cols, color="#d4edda")
+            .format({c: "{:.4f}" for c in best_metric_cols}),
         use_container_width=True,
         hide_index=True,
     )
-    best_row = basic_df.loc[basic_df["ROC-AUC"].idxmax()]
-    st.success(f"🏆 **{best_row['Model']}** currently leads on test ROC-AUC (**{best_row['ROC-AUC']:.4f}**).")
+    top_row = best_df.loc[best_df["ROC-AUC"].idxmax()]
+    st.success(f"🏆 **{top_row['Model']}** ({top_row['Pipeline']}) currently leads on test ROC-AUC (**{top_row['ROC-AUC']:.4f}**).")
+
+    st.divider()
+
+    st.subheader("📉 ROC-AUC Comparison")
+    st.pyplot(plot_best_models_rocauc(best_df))
+    st.caption(
+        "All four algorithms cluster tightly around the 0.500 chance level, "
+        "indicating none of them found a genuinely learnable relationship "
+        "between the predictor attributes and Heart Disease Status."
+    )
 
     st.divider()
 
     st.subheader("🧭 Feature Importance (Top 10)")
 
-    imp_knn = km.get_permutation_importance(basic_results["KNN"]["best_model"], X_test, y_test).head(10)
-    coef_lr = lgm.get_coefficients(basic_results["Logistic Regression"]["best_model"], X.columns.tolist()).head(10)
-    imp_rf = rfm.get_permutation_importance(basic_results["Random Forest"]["best_model"], rf_X_test, rf_y_test).head(10)
-    imp_dt = dtm.get_permutation_importance(basic_results["Decision Tree"]["best_model"], dt_X_test, dt_y_test).head(10)
+    imp_knn = km.get_permutation_importance(best_results["KNN"]["best_model"], X_test, y_test).head(10)
+    coef_lr = lgm.get_coefficients(best_results["Logistic Regression"]["best_model"], X.columns.tolist()).head(10)
+    imp_rf = rfm.get_permutation_importance(best_results["Random Forest"]["best_model"], rf_X_test, rf_y_test).head(10)
+    imp_dt = dtm.get_permutation_importance(best_results["Decision Tree"]["best_model"], dt_X_test, dt_y_test).head(10)
 
     feature_summary = pd.DataFrame({
         "Rank": range(1, 11),
@@ -591,30 +775,30 @@ elif page == "📊 Model Comparison":
         "Decision Tree": [f"{r.Feature} ({r.Importance:.3f})" for r in imp_dt.itertuples()],
     })
     st.dataframe(feature_summary, use_container_width=True, hide_index=True)
-    st.caption("KNN / Random Forest / Decision Tree values are permutation importance; Logistic Regression values are standardized coefficients.")
 
 
 elif page == "⚖️ Basic vs SMOTE":
     st.title("⚖️ Basic vs SMOTE")
-    st.caption(
-        "Per-algorithm deep dive comparing the Basic pipeline against SMOTE oversampling on the 70/30 split — "
-        "the full visual evaluation and the analysis behind why 📊 Model Comparison uses Basic pipelines only."
-    )
 
     model_tabs = st.tabs(["K-Nearest Neighbors (KNN)", "Logistic Regression", "Random Forest", "Decision Tree"])
 
-    smote_jobs = {
-        "KNN": (train_knn_smote, X, y),
-        "Decision Tree": (train_dt_smote, X, y),
-        "Logistic Regression": (train_lr_smote, X, y),
-        "Random Forest": (train_rf_smote, X, y),
-    }
-    smote_trained = run_training_jobs("Training SMOTE models", smote_jobs)
+    all_trained = train_all_models(X, y)
 
-    knn_smote_data = smote_trained["KNN"]
-    lr_smote_data = smote_trained["Logistic Regression"]
-    rf_smote_data = smote_trained["Random Forest"]
-    dt_smote_data = smote_trained["Decision Tree"]
+    knn_basic_data = all_trained["KNN"]
+    X_test, y_test = knn_basic_data["X_test"], knn_basic_data["y_test"]
+    knn_smote_data = all_trained["KNN (SMOTE)"]
+
+    dt_basic_data = all_trained["Decision Tree"]
+    dt_X_test, dt_y_test = dt_basic_data["X_test"], dt_basic_data["y_test"]
+    dt_smote_data = all_trained["Decision Tree (SMOTE)"]
+
+    lr_basic_data = all_trained["Logistic Regression"]
+    y_test_lr = lr_basic_data["y_test"]
+    lr_smote_data = all_trained["Logistic Regression (SMOTE)"]
+
+    rf_basic_data = all_trained["Random Forest"]
+    rf_X_test, rf_y_test = rf_basic_data["X_test"], rf_basic_data["y_test"]
+    rf_smote_data = all_trained["Random Forest (SMOTE)"]
 
     results = {"1. Basic KNN": knn_basic_data["result"], "2. SMOTE KNN": knn_smote_data["result"]}
     results_df = pd.DataFrame([r["metrics"] for r in results.values()])
@@ -1063,3 +1247,22 @@ elif page == "⚖️ Basic vs SMOTE":
                     use_container_width=True,
                     hide_index=True,
                 )
+
+
+elif page == "🔬 Robustness Checks":
+    st.title("🔬 Robustness Checks")
+
+    robustness_df = run_robustness_checks(X, y)
+
+    st.subheader("📈 ROC-AUC Across All Checks")
+    st.pyplot(plot_robustness_roc_auc(robustness_df))
+
+    st.divider()
+
+    st.subheader("📋 Full Results")
+    metric_cols = ["Accuracy", "Precision", "Recall", "F1-Score", "ROC-AUC"]
+    st.dataframe(
+        robustness_df.style.format({c: "{:.4f}" for c in metric_cols}),
+        use_container_width=True,
+        hide_index=True,
+    )
