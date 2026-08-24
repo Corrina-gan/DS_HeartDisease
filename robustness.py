@@ -3,6 +3,9 @@ import pandas as pd
 from sklearn.model_selection import train_test_split, GridSearchCV, cross_val_predict, StratifiedKFold
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
 from sklearn.metrics import (
     accuracy_score, precision_score, recall_score, f1_score,
@@ -85,6 +88,12 @@ if __name__ == "__main__":
     rows = []
 
     for scoring in ["f1", "accuracy", "roc_auc", "recall"]:
+        row, _, _ = eval_model(f"KNN scoring={scoring}", Pipeline([("scaler", StandardScaler()), ("knn", KNeighborsClassifier(n_neighbors=5))]),
+                                {}, scoring, Xtr, Xte, ytr, yte)
+        rows.append(row)
+        row, _, _ = eval_model(f"LR scoring={scoring}", Pipeline([("scaler", StandardScaler()), ("logreg", LogisticRegression(max_iter=5000, random_state=RANDOM_STATE))]),
+                                {}, scoring, Xtr, Xte, ytr, yte)
+        rows.append(row)
         row, _, _ = eval_model(f"DT scoring={scoring}", Pipeline([("dt", DecisionTreeClassifier(random_state=RANDOM_STATE))]),
                                 DT_GRID_CURRENT, scoring, Xtr, Xte, ytr, yte)
         rows.append(row)
