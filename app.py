@@ -12,6 +12,9 @@ from sklearn.metrics import (
 )
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
 
 import data_preprocessing as dp
@@ -211,6 +214,10 @@ def run_robustness_checks(X, y):
     rows = []
     with st.status("Running robustness checks", expanded=True) as status:
         for scoring in ["f1", "accuracy", "roc_auc", "recall"]:
+            row, _, _ = _eval_pipeline("KNN", f"scoring={scoring}", Pipeline([("scaler", StandardScaler()), ("knn", KNeighborsClassifier(n_neighbors=5))]), {}, scoring, X_train, X_test, y_train, y_test)
+            rows.append(row)
+            row, _, _ = _eval_pipeline("Logistic Regression", f"scoring={scoring}", Pipeline([("scaler", StandardScaler()), ("logreg", LogisticRegression(max_iter=5000, random_state=dp.RANDOM_STATE))]), {}, scoring, X_train, X_test, y_train, y_test)
+            rows.append(row)
             row, _, _ = _eval_pipeline("Decision Tree", f"scoring={scoring}", Pipeline([("dt", DecisionTreeClassifier(random_state=dp.RANDOM_STATE))]), dt_grid_current, scoring, X_train, X_test, y_train, y_test)
             rows.append(row)
             row, _, _ = _eval_pipeline("Random Forest", f"scoring={scoring}", Pipeline([("rf", RandomForestClassifier(random_state=dp.RANDOM_STATE))]), rf_grid_current, scoring, X_train, X_test, y_train, y_test)
@@ -253,26 +260,6 @@ def plot_robustness_roc_auc(df):
     ax.set_xlabel("ROC-AUC")
     ax.set_title("ROC-AUC Across All Robustness Checks")
     ax.legend(loc="lower right")
-    plt.tight_layout()
-    return fig
-
-
-def plot_best_models_rocauc(best_df):
-    """ROC-AUC of each algorithm's selected (Basic vs SMOTE winner) pipeline,
-    plotted live against the chance level. Mirrors plot_robustness_roc_auc
-    above but for the four-algorithm comparison shown on the Model
-    Comparison page."""
-    fig, ax = plt.subplots(figsize=(7, 5))
-    order = best_df.sort_values("ROC-AUC", ascending=False)
-    colors = ["#c44e52" if v < 0.5 else "#4c72b0" for v in order["ROC-AUC"]]
-    bars = ax.bar(order["Model"], order["ROC-AUC"], color=colors)
-    ax.bar_label(bars, fmt="%.3f", fontsize=9, padding=2)
-    ax.axhline(0.5, color="black", linestyle="--", linewidth=1, label="Chance level (0.500)")
-    ax.set_ylim(0, max(0.65, order["ROC-AUC"].max() + 0.1))
-    ax.set_ylabel("ROC-AUC")
-    ax.set_title("ROC-AUC of Each Algorithm's Selected Pipeline")
-    ax.legend(loc="upper right")
-    plt.xticks(rotation=10)
     plt.tight_layout()
     return fig
 
@@ -737,7 +724,7 @@ elif page == "\U0001F52E Predict":
 elif page == "📊 Model Comparison":
     st.title("📊 Model Comparison")
 
-    st.subheader("🏆 Metrics at a Glance")
+    st.subheader("🏆 Evaluation Metrics")
     st.dataframe(
         best_df[["Model", "Pipeline"] + best_metric_cols].style
             .highlight_max(subset=best_metric_cols, color="#d4edda")
@@ -747,16 +734,6 @@ elif page == "📊 Model Comparison":
     )
     top_row = best_df.loc[best_df["ROC-AUC"].idxmax()]
     st.success(f"🏆 **{top_row['Model']}** ({top_row['Pipeline']}) currently leads on test ROC-AUC (**{top_row['ROC-AUC']:.4f}**).")
-
-    st.divider()
-
-    st.subheader("📉 ROC-AUC Comparison")
-    st.pyplot(plot_best_models_rocauc(best_df))
-    st.caption(
-        "All four algorithms cluster tightly around the 0.500 chance level, "
-        "indicating none of them found a genuinely learnable relationship "
-        "between the predictor attributes and Heart Disease Status."
-    )
 
     st.divider()
 
