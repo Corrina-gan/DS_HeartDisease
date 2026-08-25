@@ -107,7 +107,7 @@ def tune_and_evaluate(pipeline, param_grid, X_train, X_test, y_train, y_test, mo
         f"CV {scoring.upper()} (best)": round(grid.best_score_, 4),
         "Accuracy": round(accuracy_score(y_test, y_pred), 4),
         "Precision": round(precision_score(y_test, y_pred, zero_division=0), 4),
-        "Recall": round(recall_score(y_test, y_pred), 4),
+        "Recall": round(recall_score(y_test, y_pred, zero_division=0), 4),
         "F1-Score": round(f1_score(y_test, y_pred, zero_division=0), 4),
         "ROC-AUC": round(roc_auc_score(y_test, y_prob), 4),
     }
