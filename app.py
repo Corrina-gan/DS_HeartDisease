@@ -148,7 +148,6 @@ def train_rf_smote(X, y):
         return {"X_test": X_test, "y_test": y_test, "result": result}
     return load_or_train("rf_smote", _compute, X, y)
 
-
 def run_training_jobs(label, jobs):
     outputs = {}
     with st.status(label, expanded=True) as status:
