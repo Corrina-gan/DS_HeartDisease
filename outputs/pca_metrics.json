@@ -1,0 +1,15 @@
+{
+  "Model": "RF (PCA, 19 components, 95% variance)",
+  "Original Features": 27,
+  "PCA Components": "19",
+  "Best Params": {
+    "class_weight": "balanced",
+    "min_samples_leaf": 10,
+    "n_estimators": 100
+  },
+  "Accuracy": 0.728,
+  "Precision": 0.2353,
+  "Recall": 0.16,
+  "F1-Score": 0.1905,
+  "ROC-AUC": 0.5149
+}

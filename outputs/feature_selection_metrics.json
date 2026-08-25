@@ -1,0 +1,13 @@
+{
+  "Model": "RF (Top-10 ANOVA Features)",
+  "Best Params": {
+    "class_weight": "balanced",
+    "min_samples_leaf": 10,
+    "n_estimators": 100
+  },
+  "Accuracy": 0.6567,
+  "Precision": 0.2071,
+  "Recall": 0.2533,
+  "F1-Score": 0.2279,
+  "ROC-AUC": 0.5031
+}
