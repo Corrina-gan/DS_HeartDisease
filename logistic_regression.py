@@ -149,9 +149,17 @@ def tune_and_evaluate(pipeline, param_grid, X_train, X_test, y_train, y_test, mo
 
 def get_coefficients(best_model, feature_names, step_name="logreg"):
     coefs = best_model.named_steps[step_name].coef_[0]
+    names = list(feature_names)
+    if len(names) != len(coefs):
+        raise ValueError(
+            f"Logistic Regression has {len(coefs)} coefficients but "
+            f"{len(names)} feature names were passed. The cached model was "
+            "likely fit before the one-hot encoding change. Clear "
+            ".model_cache and rerun the app."
+        )
 
     coef_df = pd.DataFrame({
-        "Feature": feature_names,
+        "Feature": names,
         "Coefficient": coefs,
     })
     coef_df["Abs_Coefficient"] = coef_df["Coefficient"].abs()
