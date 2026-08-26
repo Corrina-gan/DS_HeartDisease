@@ -1,3 +1,4 @@
+import hashlib
 import os
 
 import joblib
@@ -30,12 +31,26 @@ st.set_page_config(page_title="Heart Disease Risk", layout="wide", page_icon="\u
 DEFAULT_DATA_PATH = "heart_disease.csv"
 MODEL_CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".model_cache")
 os.makedirs(MODEL_CACHE_DIR, exist_ok=True)
+# Bump this when encoding / feature columns change so Streamlit and joblib
+# caches do not reuse models fit on the previous column set.
+FEATURE_CACHE_TAG = "keep_both_dummies"
+
+
+def _feature_cache_sig(X):
+    joined = "|".join(map(str, X.columns))
+    return hashlib.md5(joined.encode("utf-8")).hexdigest()[:12]
 
 
 def load_or_train(cache_name, compute_fn, X, y):
-    path = os.path.join(MODEL_CACHE_DIR, f"{cache_name}.joblib")
+    sig = _feature_cache_sig(X)
+    path = os.path.join(MODEL_CACHE_DIR, f"{cache_name}_{sig}.joblib")
     if os.path.exists(path):
-        return joblib.load(path)
+        data = joblib.load(path)
+        model = data.get("result", {}).get("best_model")
+        n_in = getattr(model, "n_features_in_", None) if model is not None else None
+        if n_in is None or n_in == X.shape[1]:
+            return data
+        os.remove(path)
     data = compute_fn(X, y)
     joblib.dump(data, path)
     return data
@@ -54,7 +69,7 @@ def load_raw_data(path):
 
 
 @st.cache_resource(show_spinner=False)
-def train_knn_basic(X, y):
+def train_knn_basic(X, y, _cache_tag=FEATURE_CACHE_TAG):
     def _compute(X, y):
         X_train, X_test, y_train, y_test = km.get_70_30_split(X, y)
         result = km.tune_and_evaluate(
@@ -66,7 +81,7 @@ def train_knn_basic(X, y):
 
 
 @st.cache_resource(show_spinner=False)
-def train_knn_smote(X, y):
+def train_knn_smote(X, y, _cache_tag=FEATURE_CACHE_TAG):
     def _compute(X, y):
         X_train, X_test, y_train, y_test = km.get_70_30_split(X, y)
         result = km.tune_and_evaluate(
@@ -78,7 +93,7 @@ def train_knn_smote(X, y):
 
 
 @st.cache_resource(show_spinner=False)
-def train_dt_basic(X, y):
+def train_dt_basic(X, y, _cache_tag=FEATURE_CACHE_TAG):
     def _compute(X, y):
         X_train, X_test, y_train, y_test = dtm.get_70_30_split(X, y)
         result = dtm.tune_and_evaluate(
@@ -90,7 +105,7 @@ def train_dt_basic(X, y):
 
 
 @st.cache_resource(show_spinner=False)
-def train_dt_smote(X, y):
+def train_dt_smote(X, y, _cache_tag=FEATURE_CACHE_TAG):
     def _compute(X, y):
         X_train, X_test, y_train, y_test = dtm.get_70_30_split(X, y)
         result = dtm.tune_and_evaluate(
@@ -102,7 +117,7 @@ def train_dt_smote(X, y):
 
 
 @st.cache_resource(show_spinner=False)
-def train_lr_basic(X, y):
+def train_lr_basic(X, y, _cache_tag=FEATURE_CACHE_TAG):
     def _compute(X, y):
         X_train, X_test, y_train, y_test = lgm.get_70_30_split(X, y)
         result = lgm.tune_and_evaluate(
@@ -114,7 +129,7 @@ def train_lr_basic(X, y):
 
 
 @st.cache_resource(show_spinner=False)
-def train_lr_smote(X, y):
+def train_lr_smote(X, y, _cache_tag=FEATURE_CACHE_TAG):
     def _compute(X, y):
         X_train, X_test, y_train, y_test = lgm.get_70_30_split(X, y)
         result = lgm.tune_and_evaluate(
@@ -126,7 +141,7 @@ def train_lr_smote(X, y):
 
 
 @st.cache_resource(show_spinner=False)
-def train_rf_basic(X, y):
+def train_rf_basic(X, y, _cache_tag=FEATURE_CACHE_TAG):
     def _compute(X, y):
         X_train, X_test, y_train, y_test = rfm.get_70_30_split(X, y)
         result = rfm.tune_and_evaluate(
@@ -138,7 +153,7 @@ def train_rf_basic(X, y):
 
 
 @st.cache_resource(show_spinner=False)
-def train_rf_smote(X, y):
+def train_rf_smote(X, y, _cache_tag=FEATURE_CACHE_TAG):
     def _compute(X, y):
         X_train, X_test, y_train, y_test = rfm.get_70_30_split(X, y)
         result = rfm.tune_and_evaluate(
@@ -654,7 +669,7 @@ elif page == "🧹 Preprocessing":
                 "- **Features:** `Exercise Habits`, `Stress Level`, `Sugar Consumption`, `Alcohol Consumption`\n\n"
                 "**2. One-Hot Encoding (Dummy Variables)**\n"
                 "- **Rule:** Applied to binary or nominal categories without a specific order to prevent the model from assuming a false hierarchy.\n"
-                "- **Features:** `Gender`, `Smoking`, `Diabetes`, `Blood Pressure`, `Cholesterol`, `Family History`\n\n"
+                "- **Features (both levels kept, `drop_first=False`):** `Gender`, `Smoking`, `Family Heart Disease`, `Diabetes`, `High Blood Pressure`, `Low HDL Cholesterol`, `High LDL Cholesterol`\n\n"
                 "**3. Label Encoding**\n"
                 f"- **Rule:** Converts the final predicted outcome into a binary machine-readable format.\n"
                 f"- **Target:** `{dp.TARGET_COL}` → `{target_mapping}`"

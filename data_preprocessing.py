@@ -79,10 +79,10 @@ def encode_features(df, categorical_cols, target_col=TARGET_COL, ordinal_maps=No
     # 2. Get binary columns
     binary_cols = [c for c in categorical_cols if c not in ordinal_maps]
     
-    # 3. Create dummy variables (drop_first=True -> true binary encoding,
-    # 1 column per Yes/No or Male/Female attribute, avoids the dummy
-    # variable trap / redundant mirrored columns)
-    df = pd.get_dummies(df, columns=binary_cols, drop_first=True)
+    # 3. One-hot encode binary/nominal columns and keep every level
+    # (drop_first=False), matching the report so plots can name both
+    # categories (e.g. Gender_Male and Gender_Female).
+    df = pd.get_dummies(df, columns=binary_cols, drop_first=False)
     
     # 4. Convert new boolean dummy columns to integers
     new_dummy_cols = [c for c in df.columns if any(c.startswith(b + "_") for b in binary_cols)]
