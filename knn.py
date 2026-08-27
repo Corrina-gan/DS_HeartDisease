@@ -264,7 +264,7 @@ def run_knn_experiments(path="heart_disease.csv", save_outputs=True, show_plots=
         fig_roc.savefig(os.path.join(OUTPUT_DIR, "knn_roc_curves.png"), dpi=150, bbox_inches="tight")
         fig_metrics.savefig(os.path.join(OUTPUT_DIR, "knn_metric_comparison.png"), dpi=150, bbox_inches="tight")
         print(f"\nSaved metrics + plots to ./{OUTPUT_DIR}/")
-
+        
     return {
         "X_train": X_train, "X_test": X_test, "y_train": y_train, "y_test": y_test,
         "results": all_results,
