@@ -489,7 +489,7 @@ if page == "🏠 Home (Predict & Overview)":
         st.markdown("<br>", unsafe_allow_html=True)
         submit_col1, submit_col2, submit_col3 = st.columns([1, 2, 1])
         with submit_col2:
-            submitted = st.form_submit_button("Generate Prediction", use_container_width=True)
+            submitted = st.form_submit_button("Generate Prediction", width="stretch")
 
     if submitted:
         raw_input = {**numeric_inputs, **categorical_inputs}
@@ -540,7 +540,7 @@ if page == "🏠 Home (Predict & Overview)":
 
         g_col1, g_col2, g_col3 = st.columns([1, 2, 1])
         with g_col2:
-            st.plotly_chart(fig_gauge, use_container_width=True)
+            st.plotly_chart(fig_gauge, width="stretch")
 
         st.caption(f"Powered by {model_choice} ({best_pipeline_used[model_choice]} pipeline)")
 
@@ -572,7 +572,7 @@ if page == "🏠 Home (Predict & Overview)":
 
         st.markdown("<br>", unsafe_allow_html=True)
         with st.expander("📂 View Sample Patient Records (Raw Data)"):
-            st.dataframe(raw_df.head(15), use_container_width=True)
+            st.dataframe(raw_df.head(15), width="stretch")
 
 
 elif page == "🔍 EDA":
@@ -607,9 +607,9 @@ elif page == "🔍 EDA":
 
         colA, colB = st.columns(2)
         colA.markdown("**Numeric (Point-Biserial r)**")
-        colA.dataframe(table_numeric, use_container_width=True)
+        colA.dataframe(table_numeric, width="stretch")
         colB.markdown("**Categorical (Cramer's V)**")
-        colB.dataframe(table_categorical, use_container_width=True)
+        colB.dataframe(table_categorical, width="stretch")
 
         st.divider()
         st.pyplot(eda_figs["num_by_target"])
@@ -625,7 +625,7 @@ elif page == "🔍 EDA":
         st.subheader("Outlier Detection (1.5× IQR)")
         st.pyplot(eda_figs["outliers"])
         with st.expander("📂 View Exact Outlier Counts"):
-            st.dataframe(outlier_df, use_container_width=True)
+            st.dataframe(outlier_df, width="stretch")
 
 
 elif page == "🧹 Preprocessing":
@@ -652,7 +652,7 @@ elif page == "🧹 Preprocessing":
             st.subheader("Missing-Value Treatment")
             display_summary = missing_treatment_summary.copy()
             display_summary["Imputation Value"] = display_summary["Imputation Value"].astype(str)
-            st.dataframe(display_summary, use_container_width=True)
+            st.dataframe(display_summary, width="stretch")
 
         st.divider()
         st.subheader("MCAR Test: Alcohol Consumption")
@@ -676,7 +676,7 @@ elif page == "🧹 Preprocessing":
             )
         with col_e2:
             st.write(f"**Final Feature Matrix:** {X.shape[0]:,} rows × {X.shape[1]} columns")
-            st.dataframe(X.head(10), use_container_width=True)
+            st.dataframe(X.head(10), width="stretch")
 
     with prep_tab3:
         st.subheader("Post-Encoding Feature Diagnostics")
@@ -684,88 +684,168 @@ elif page == "🧹 Preprocessing":
 
         col_d1, col_d2 = st.columns(2)
         col_d1.markdown("**ANOVA F-scores**")
-        col_d1.dataframe(anova_df, use_container_width=True)
+        col_d1.dataframe(anova_df, width="stretch")
         col_d2.markdown("**Chi-Square scores**")
-        col_d2.dataframe(chi2_df, use_container_width=True)
-
-
-elif page == "\U0001F52E Predict":
-    st.title("Predict Heart Disease Risk")
-    st.caption("Fill in the fields, pick a model, and get a live prediction.")
-
-    model_choice = st.selectbox("Model", list(results.keys()))
-    best_model = results[model_choice]["best_model"]
-
-    with st.form("predict_form"):
-        st.subheader("Numeric")
-        numeric_inputs = {}
-        cols = st.columns(3)
-        for i, col in enumerate(numeric_cols):
-            default = float(raw_df[col].median())
-            numeric_inputs[col] = cols[i % 3].number_input(col, value=default)
-
-        st.subheader("Categorical")
-        categorical_inputs = {}
-        cols2 = st.columns(3)
-        for i, col in enumerate(categorical_cols):
-            if col in dp.ORDINAL_MAPS:
-                options = list(dp.ORDINAL_MAPS[col].keys())
-            else:
-                options = sorted(raw_df[col].dropna().unique().tolist())
-            categorical_inputs[col] = cols2[i % 3].selectbox(col, options)
-
-        submitted = st.form_submit_button("Predict")
-
-    if submitted:
-        raw_input = {**numeric_inputs, **categorical_inputs}
-        row = dp.build_single_row_features(raw_input, categorical_cols, X.columns.tolist())
-
-        pred = int(best_model.predict(row)[0])
-        prob_disease = float(best_model.predict_proba(row)[0, 1])
-        label = le_target.inverse_transform([pred])[0]
-
-        st.subheader("Result")
-        if pred == 1:
-            st.error(f"Prediction: **{label}** \u2014 probability of heart disease: {prob_disease:.1%}")
-        else:
-            st.success(f"Prediction: **{label}** \u2014 probability of heart disease: {prob_disease:.1%}")
-        st.progress(min(max(prob_disease, 0.0), 1.0))
-        st.caption(
-            f"Model: {model_choice} \u2014 Best Params: `{results[model_choice]['metrics']['Best Params']}`"
-        )
+        col_d2.dataframe(chi2_df, width="stretch")
 
 
 elif page == "📊 Model Comparison":
     st.title("📊 Model Comparison")
 
+    metrics_view = best_df[["Model", "Pipeline"] + best_metric_cols]
+    top_row = best_df.loc[best_df["ROC-AUC"].idxmax()]
+
     st.subheader("🏆 Evaluation Metrics")
+    card_theme = {
+        "KNN": {
+            "key": "compare_knn", "color": "red", "badge": "red",
+            "icon": ":material/scatter_plot:",
+        },
+        "Logistic Regression": {
+            "key": "compare_logreg", "color": "green", "badge": "green",
+            "icon": ":material/show_chart:",
+        },
+        "Random Forest": {
+            "key": "compare_rf", "color": "blue", "badge": "blue",
+            "icon": ":material/forest:",
+        },
+        "Decision Tree": {
+            "key": "compare_dt", "color": "orange", "badge": "orange",
+            "icon": ":material/account_tree:",
+        },
+    }
+    st.html(
+        """
+        <style>
+        .st-key-compare_knn, .st-key-compare_logreg, .st-key-compare_rf, .st-key-compare_dt {
+            border-radius: 14px !important;
+        }
+        .st-key-compare_knn {
+            background: linear-gradient(180deg, #fde8ea 0%, #ffffff 42%) !important;
+            border: 1px solid #f3b4b8 !important;
+            border-top: 6px solid #c44e52 !important;
+        }
+        .st-key-compare_logreg {
+            background: linear-gradient(180deg, #e5f6f1 0%, #ffffff 42%) !important;
+            border: 1px solid #9fd6c9 !important;
+            border-top: 6px solid #2a9d8f !important;
+        }
+        .st-key-compare_rf {
+            background: linear-gradient(180deg, #e7f1f8 0%, #ffffff 42%) !important;
+            border: 1px solid #a9c7de !important;
+            border-top: 6px solid #457b9d !important;
+        }
+        .st-key-compare_dt {
+            background: linear-gradient(180deg, #fff4d6 0%, #ffffff 42%) !important;
+            border: 1px solid #efd48a !important;
+            border-top: 6px solid #d4a017 !important;
+        }
+        .st-key-compare_knn [data-testid="stMetric"]:last-of-type,
+        .st-key-compare_logreg [data-testid="stMetric"]:last-of-type,
+        .st-key-compare_rf [data-testid="stMetric"]:last-of-type,
+        .st-key-compare_dt [data-testid="stMetric"]:last-of-type {
+            background: rgba(255,255,255,0.85);
+        }
+        </style>
+        """
+    )
+    model_cols = st.columns(4)
+    for col, (_, row) in zip(model_cols, best_df.iterrows()):
+        theme = card_theme[row["Model"]]
+        accent = theme["color"]
+        with col:
+            with st.container(border=True, key=theme["key"]):
+                st.markdown(f"{theme['icon']} :{accent}[**{row['Model']}**]")
+                with st.container(horizontal=True):
+                    st.badge(row["Pipeline"], color=theme["badge"])
+                    if row["Model"] == top_row["Model"]:
+                        st.badge("Leader", icon=":material/emoji_events:", color="orange")
+                st.metric("Accuracy", f":{accent}[{row['Accuracy']:.4f}]")
+                st.metric("Precision", f":{accent}[{row['Precision']:.4f}]")
+                st.metric("Recall", f":{accent}[{row['Recall']:.4f}]")
+                st.metric("F1-Score", f":{accent}[{row['F1-Score']:.4f}]")
+                st.metric("ROC-AUC", f":{accent}[**{row['ROC-AUC']:.4f}**]", border=True)
+
     st.dataframe(
-        best_df[["Model", "Pipeline"] + best_metric_cols].style
+        metrics_view.style
             .highlight_max(subset=best_metric_cols, color="#d4edda")
             .format({c: "{:.4f}" for c in best_metric_cols}),
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )
-    top_row = best_df.loc[best_df["ROC-AUC"].idxmax()]
-    st.success(f"🏆 **{top_row['Model']}** ({top_row['Pipeline']}) currently leads on test ROC-AUC (**{top_row['ROC-AUC']:.4f}**).")
+    st.success(
+        f"🏆 **{top_row['Model']}** ({top_row['Pipeline']}) currently leads on test ROC-AUC (**{top_row['ROC-AUC']:.4f}**)."
+    )
 
-    st.divider()
+    acc_row = best_df.loc[best_df["Accuracy"].idxmax()]
+    rec_row = best_df.loc[best_df["Recall"].idxmax()]
+    f1_row = best_df.loc[best_df["F1-Score"].idxmax()]
+    no_share = float((y == 0).mean())
+    max_auc = float(best_df["ROC-AUC"].max())
+
+    st.subheader("📝 Conclusion & explanation")
+    with st.container(border=True):
+        st.markdown("**How to read the scores**")
+        st.markdown(
+            """
+- **Accuracy** — share of all test patients the model labelled correctly. This looks strong when most people do **not** have heart disease.
+- **Precision** — of the patients flagged as **Yes**, how many truly had disease.
+- **Recall** — of the patients who truly had disease, how many the model caught. This is the clinically important miss-rate score.
+- **F1-score** — a single balance of precision and recall.
+- **ROC-AUC** — how well the model ranks disease risk. **0.50 is chance**; 1.00 is perfect. We pick the displayed pipeline (Basic vs SMOTE) by ROC-AUC first, then accuracy.
+            """
+        )
+
+        st.markdown("**What the comparison shows**")
+        if rec_row["Model"] == f1_row["Model"]:
+            catch_line = (
+                f"- **{rec_row['Model']}** has the highest **recall ({rec_row['Recall']:.4f})** "
+                f"and **F1 ({f1_row['F1-Score']:.4f})**. That model flags more **Yes** cases, "
+                "so accuracy drops — it trades extra false alarms for fewer missed patients."
+            )
+        else:
+            catch_line = (
+                f"- **{rec_row['Model']}** has the highest **recall ({rec_row['Recall']:.4f})** "
+                f"and **{f1_row['Model']}** the highest **F1 ({f1_row['F1-Score']:.4f})**. "
+                "Those models flag more **Yes** cases, so accuracy drops — they trade extra false alarms for fewer missed patients."
+            )
+        st.markdown(
+            f"""
+- **{top_row['Model']}** ({top_row['Pipeline']}) is the overall leader because it has the highest **ROC-AUC ({top_row['ROC-AUC']:.4f})**. That is the fairest headline metric here: the dataset is imbalanced (about **{no_share:.0%} No** / **{1 - no_share:.0%} Yes**).
+- **{acc_row['Model']}** has the highest **accuracy ({acc_row['Accuracy']:.4f})**, but its **recall is only {acc_row['Recall']:.4f}**. It mostly predicts **No**, so it misses most true disease cases.
+{catch_line}
+- A dummy rule that always says **No** would already score about **{no_share:.0%} accuracy** with **0 recall**. High accuracy alone does **not** mean a useful heart-disease detector.
+            """
+        )
+
+        if max_auc < 0.55:
+            st.markdown(
+                f"""
+**In conclusion.** {top_row['Model']} is the best of these four on ranking quality, but every ROC-AUC is still near **0.50**. The models are not reliably separating Yes from No on this feature set. Treat live predictions as illustrative, not clinical decisions.
+                """
+            )
+        else:
+            st.markdown(
+                f"""
+**In conclusion.** **{top_row['Model']}** ({top_row['Pipeline']}) is the preferred model: best ROC-AUC (**{top_row['ROC-AUC']:.4f}**) under class imbalance. Still check recall if the goal is to catch disease cases rather than maximise accuracy.
+                """
+            )
 
     st.subheader("🧭 Feature Importance (Top 10)")
+    with st.container(border=True):
+        imp_knn = km.get_permutation_importance(best_results["KNN"]["best_model"], X_test, y_test).head(10)
+        coef_lr = lgm.get_coefficients(best_results["Logistic Regression"]["best_model"], X.columns.tolist()).head(10)
+        imp_rf = rfm.get_permutation_importance(best_results["Random Forest"]["best_model"], rf_X_test, rf_y_test).head(10)
+        imp_dt = dtm.get_permutation_importance(best_results["Decision Tree"]["best_model"], dt_X_test, dt_y_test).head(10)
 
-    imp_knn = km.get_permutation_importance(best_results["KNN"]["best_model"], X_test, y_test).head(10)
-    coef_lr = lgm.get_coefficients(best_results["Logistic Regression"]["best_model"], X.columns.tolist()).head(10)
-    imp_rf = rfm.get_permutation_importance(best_results["Random Forest"]["best_model"], rf_X_test, rf_y_test).head(10)
-    imp_dt = dtm.get_permutation_importance(best_results["Decision Tree"]["best_model"], dt_X_test, dt_y_test).head(10)
-
-    feature_summary = pd.DataFrame({
-        "Rank": range(1, 11),
-        "KNN": [f"{r.Feature} ({r.Importance:.3f})" for r in imp_knn.itertuples()],
-        "Logistic Regression": [f"{r.Feature} ({r.Coefficient:+.3f})" for r in coef_lr.itertuples()],
-        "Random Forest": [f"{r.Feature} ({r.Importance:.3f})" for r in imp_rf.itertuples()],
-        "Decision Tree": [f"{r.Feature} ({r.Importance:.3f})" for r in imp_dt.itertuples()],
-    })
-    st.dataframe(feature_summary, use_container_width=True, hide_index=True)
+        feature_summary = pd.DataFrame({
+            "Rank": range(1, 11),
+            "KNN": [f"{r.Feature} ({r.Importance:.3f})" for r in imp_knn.itertuples()],
+            "Logistic Regression": [f"{r.Feature} ({r.Coefficient:+.3f})" for r in coef_lr.itertuples()],
+            "Random Forest": [f"{r.Feature} ({r.Importance:.3f})" for r in imp_rf.itertuples()],
+            "Decision Tree": [f"{r.Feature} ({r.Importance:.3f})" for r in imp_dt.itertuples()],
+        })
+        st.dataframe(feature_summary, width="stretch", hide_index=True)
 
 
 elif page == "⚖️ Basic vs SMOTE":
@@ -862,7 +942,7 @@ elif page == "⚖️ Basic vs SMOTE":
             df_rep_basic.rename(index={'0': 'No Disease (0)', '1': 'Disease (1)', 'macro avg': 'Macro Avg', 'weighted avg': 'Weighted Avg'}, inplace=True)
             df_rep_basic = df_rep_basic.drop(index=['accuracy'], errors='ignore').drop(columns=['support'], errors='ignore')
 
-            st.dataframe(df_rep_basic.style.background_gradient(cmap='Blues').format("{:.3f}"), use_container_width=True)
+            st.dataframe(df_rep_basic.style.background_gradient(cmap='Blues').format("{:.3f}"), width="stretch")
 
 
             with st.expander("⚙️ View Basic Hyperparameters"):
@@ -879,7 +959,7 @@ elif page == "⚖️ Basic vs SMOTE":
             df_rep_smote.rename(index={'0': 'No Disease (0)', '1': 'Disease (1)', 'macro avg': 'Macro Avg', 'weighted avg': 'Weighted Avg'}, inplace=True)
             df_rep_smote = df_rep_smote.drop(index=['accuracy'], errors='ignore').drop(columns=['support'], errors='ignore')
 
-            st.dataframe(df_rep_smote.style.background_gradient(cmap='Greens').format("{:.3f}"), use_container_width=True)
+            st.dataframe(df_rep_smote.style.background_gradient(cmap='Greens').format("{:.3f}"), width="stretch")
 
 
             with st.expander("⚙️ View SMOTE Hyperparameters"):
@@ -899,7 +979,7 @@ elif page == "⚖️ Basic vs SMOTE":
             with perm_col2:
                 st.dataframe(
                     imp_df_basic[["Rank", "Feature", "Importance"]].style.format({"Importance": "{:.4f}"}),
-                    use_container_width=True,
+                    width="stretch",
                     hide_index=True,
                 )
 
@@ -911,7 +991,7 @@ elif page == "⚖️ Basic vs SMOTE":
             with perm_col4:
                 st.dataframe(
                     imp_df_smote[["Rank", "Feature", "Importance"]].style.format({"Importance": "{:.4f}"}),
-                    use_container_width=True,
+                    width="stretch",
                     hide_index=True,
                 )
 
@@ -970,7 +1050,7 @@ elif page == "⚖️ Basic vs SMOTE":
             df_rep_lr_basic.rename(index={'0': 'No Disease (0)', '1': 'Disease (1)', 'macro avg': 'Macro Avg', 'weighted avg': 'Weighted Avg'}, inplace=True)
             df_rep_lr_basic = df_rep_lr_basic.drop(index=['accuracy'], errors='ignore').drop(columns=['support'], errors='ignore')
 
-            st.dataframe(df_rep_lr_basic.style.background_gradient(cmap='Blues').format("{:.3f}"), use_container_width=True)
+            st.dataframe(df_rep_lr_basic.style.background_gradient(cmap='Blues').format("{:.3f}"), width="stretch")
 
             with st.expander("⚙️ View Basic Hyperparameters"):
                 st.json(res_lr_basic['metrics']['Best Params'])
@@ -985,7 +1065,7 @@ elif page == "⚖️ Basic vs SMOTE":
             df_rep_lr_smote.rename(index={'0': 'No Disease (0)', '1': 'Disease (1)', 'macro avg': 'Macro Avg', 'weighted avg': 'Weighted Avg'}, inplace=True)
             df_rep_lr_smote = df_rep_lr_smote.drop(index=['accuracy'], errors='ignore').drop(columns=['support'], errors='ignore')
 
-            st.dataframe(df_rep_lr_smote.style.background_gradient(cmap='Greens').format("{:.3f}"), use_container_width=True)
+            st.dataframe(df_rep_lr_smote.style.background_gradient(cmap='Greens').format("{:.3f}"), width="stretch")
 
             with st.expander("⚙️ View SMOTE Hyperparameters"):
                 st.json(res_lr_smote['metrics']['Best Params'])
@@ -1009,7 +1089,7 @@ elif page == "⚖️ Basic vs SMOTE":
             with coef_col2:
                 st.dataframe(
                     coef_df_basic[["Rank", "Feature", "Coefficient", "Effect"]],
-                    use_container_width=True,
+                    width="stretch",
                     hide_index=True,
                 )
 
@@ -1021,7 +1101,7 @@ elif page == "⚖️ Basic vs SMOTE":
             with coef_col4:
                 st.dataframe(
                     coef_df_smote[["Rank", "Feature", "Coefficient", "Effect"]],
-                    use_container_width=True,
+                    width="stretch",
                     hide_index=True,
                 )
 
@@ -1081,7 +1161,7 @@ elif page == "⚖️ Basic vs SMOTE":
             rf_df_rep_basic.rename(index={'0': 'No Disease (0)', '1': 'Disease (1)', 'macro avg': 'Macro Avg', 'weighted avg': 'Weighted Avg'}, inplace=True)
             rf_df_rep_basic = rf_df_rep_basic.drop(index=['accuracy'], errors='ignore').drop(columns=['support'], errors='ignore')
 
-            st.dataframe(rf_df_rep_basic.style.background_gradient(cmap='Blues').format("{:.3f}"), use_container_width=True)
+            st.dataframe(rf_df_rep_basic.style.background_gradient(cmap='Blues').format("{:.3f}"), width="stretch")
 
             with st.expander("⚙️ View Basic Hyperparameters"):
                 st.json(rf_res_basic['metrics']['Best Params'])
@@ -1097,7 +1177,7 @@ elif page == "⚖️ Basic vs SMOTE":
             rf_df_rep_smote.rename(index={'0': 'No Disease (0)', '1': 'Disease (1)', 'macro avg': 'Macro Avg', 'weighted avg': 'Weighted Avg'}, inplace=True)
             rf_df_rep_smote = rf_df_rep_smote.drop(index=['accuracy'], errors='ignore').drop(columns=['support'], errors='ignore')
 
-            st.dataframe(rf_df_rep_smote.style.background_gradient(cmap='Greens').format("{:.3f}"), use_container_width=True)
+            st.dataframe(rf_df_rep_smote.style.background_gradient(cmap='Greens').format("{:.3f}"), width="stretch")
 
             with st.expander("⚙️ View SMOTE Hyperparameters"):
                 st.json(rf_res_smote['metrics']['Best Params'])
@@ -1116,7 +1196,7 @@ elif page == "⚖️ Basic vs SMOTE":
             with rf_perm_col2:
                 st.dataframe(
                     rf_imp_basic[["Rank", "Feature", "Importance"]].style.format({"Importance": "{:.4f}"}),
-                    use_container_width=True,
+                    width="stretch",
                     hide_index=True,
                 )
 
@@ -1128,7 +1208,7 @@ elif page == "⚖️ Basic vs SMOTE":
             with rf_perm_col4:
                 st.dataframe(
                     rf_imp_smote[["Rank", "Feature", "Importance"]].style.format({"Importance": "{:.4f}"}),
-                    use_container_width=True,
+                    width="stretch",
                     hide_index=True,
                 )
 
@@ -1188,7 +1268,7 @@ elif page == "⚖️ Basic vs SMOTE":
             dt_df_rep_basic.rename(index={'0': 'No Disease (0)', '1': 'Disease (1)', 'macro avg': 'Macro Avg', 'weighted avg': 'Weighted Avg'}, inplace=True)
             dt_df_rep_basic = dt_df_rep_basic.drop(index=['accuracy'], errors='ignore').drop(columns=['support'], errors='ignore')
 
-            st.dataframe(dt_df_rep_basic.style.background_gradient(cmap='Blues').format("{:.3f}"), use_container_width=True)
+            st.dataframe(dt_df_rep_basic.style.background_gradient(cmap='Blues').format("{:.3f}"), width="stretch")
 
             with st.expander("⚙️ View Basic Hyperparameters"):
                 st.json(dt_res_basic['metrics']['Best Params'])
@@ -1204,7 +1284,7 @@ elif page == "⚖️ Basic vs SMOTE":
             dt_df_rep_smote.rename(index={'0': 'No Disease (0)', '1': 'Disease (1)', 'macro avg': 'Macro Avg', 'weighted avg': 'Weighted Avg'}, inplace=True)
             dt_df_rep_smote = dt_df_rep_smote.drop(index=['accuracy'], errors='ignore').drop(columns=['support'], errors='ignore')
 
-            st.dataframe(dt_df_rep_smote.style.background_gradient(cmap='Greens').format("{:.3f}"), use_container_width=True)
+            st.dataframe(dt_df_rep_smote.style.background_gradient(cmap='Greens').format("{:.3f}"), width="stretch")
 
             with st.expander("⚙️ View SMOTE Hyperparameters"):
                 st.json(dt_res_smote['metrics']['Best Params'])
@@ -1223,7 +1303,7 @@ elif page == "⚖️ Basic vs SMOTE":
             with dt_perm_col2:
                 st.dataframe(
                     dt_imp_basic[["Rank", "Feature", "Importance"]].style.format({"Importance": "{:.4f}"}),
-                    use_container_width=True,
+                    width="stretch",
                     hide_index=True,
                 )
 
@@ -1235,7 +1315,7 @@ elif page == "⚖️ Basic vs SMOTE":
             with dt_perm_col4:
                 st.dataframe(
                     dt_imp_smote[["Rank", "Feature", "Importance"]].style.format({"Importance": "{:.4f}"}),
-                    use_container_width=True,
+                    width="stretch",
                     hide_index=True,
                 )
 
@@ -1254,6 +1334,6 @@ elif page == "🔬 Robustness Checks":
     metric_cols = ["Accuracy", "Precision", "Recall", "F1-Score", "ROC-AUC"]
     st.dataframe(
         robustness_df.style.format({c: "{:.4f}" for c in metric_cols}),
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )

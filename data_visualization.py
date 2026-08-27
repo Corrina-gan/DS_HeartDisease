@@ -24,7 +24,7 @@ def section(title):
 
 def plot_class_distribution(df, target_col=TARGET_COL):
     fig, ax = plt.subplots(figsize=(7, 5))
-    sns.countplot(x=target_col, data=df, ax=ax)
+    sns.countplot(x=target_col, hue=target_col, data=df, palette="Set2", legend=False, ax=ax)
     ax.set_title("Class distribution: Heart Disease Status")
     fig.tight_layout()
     return fig

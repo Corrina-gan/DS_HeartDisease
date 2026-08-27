@@ -64,7 +64,7 @@ def run_feature_selection_check(path="heart_disease.csv", top_k=TOP_K, save_outp
     # Plot: ANOVA F-scores for top features (for report figure)
     fig1, ax1 = plt.subplots(figsize=(8, 5))
     plot_df = anova_results.head(top_k).sort_values("F-Score")
-    sns.barplot(x="F-Score", y="Feature", data=plot_df, palette="viridis", ax=ax1)
+    sns.barplot(x="F-Score", y="Feature", hue="Feature", data=plot_df, palette="viridis", legend=False, ax=ax1)
     ax1.set_title(f"Top {top_k} Features by ANOVA F-Score")
     ax1.set_xlabel("F-Score")
     plt.tight_layout()
