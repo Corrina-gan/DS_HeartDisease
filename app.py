@@ -689,86 +689,163 @@ elif page == "🧹 Preprocessing":
         col_d2.dataframe(chi2_df, width="stretch")
 
 
-# Unused leftover page (not in the sidebar). Live prediction is on Home.
-# `results` was never defined here; Home uses `all_results` instead.
-#
-# elif page == "\U0001F52E Predict":
-#     st.title("Predict Heart Disease Risk")
-#     st.caption("Fill in the fields, pick a model, and get a live prediction.")
-#
-#     model_choice = st.selectbox("Model", list(results.keys()))
-#     best_model = results[model_choice]["best_model"]
-#
-#     with st.form("predict_form"):
-#         st.subheader("Numeric")
-#         numeric_inputs = {}
-#         cols = st.columns(3)
-#         for i, col in enumerate(numeric_cols):
-#             default = float(raw_df[col].median())
-#             numeric_inputs[col] = cols[i % 3].number_input(col, value=default)
-#
-#         st.subheader("Categorical")
-#         categorical_inputs = {}
-#         cols2 = st.columns(3)
-#         for i, col in enumerate(categorical_cols):
-#             if col in dp.ORDINAL_MAPS:
-#                 options = list(dp.ORDINAL_MAPS[col].keys())
-#             else:
-#                 options = sorted(raw_df[col].dropna().unique().tolist())
-#             categorical_inputs[col] = cols2[i % 3].selectbox(col, options)
-#
-#         submitted = st.form_submit_button("Predict")
-#
-#     if submitted:
-#         raw_input = {**numeric_inputs, **categorical_inputs}
-#         row = dp.build_single_row_features(raw_input, categorical_cols, X.columns.tolist())
-#
-#         pred = int(best_model.predict(row)[0])
-#         prob_disease = float(best_model.predict_proba(row)[0, 1])
-#         label = le_target.inverse_transform([pred])[0]
-#
-#         st.subheader("Result")
-#         if pred == 1:
-#             st.error(f"Prediction: **{label}** \u2014 probability of heart disease: {prob_disease:.1%}")
-#         else:
-#             st.success(f"Prediction: **{label}** \u2014 probability of heart disease: {prob_disease:.1%}")
-#         st.progress(min(max(prob_disease, 0.0), 1.0))
-#         st.caption(
-#             f"Model: {model_choice} \u2014 Best Params: `{results[model_choice]['metrics']['Best Params']}`"
-#         )
-
-
 elif page == "📊 Model Comparison":
     st.title("📊 Model Comparison")
 
+    metrics_view = best_df[["Model", "Pipeline"] + best_metric_cols]
+    top_row = best_df.loc[best_df["ROC-AUC"].idxmax()]
+
     st.subheader("🏆 Evaluation Metrics")
+    card_theme = {
+        "KNN": {
+            "key": "compare_knn", "color": "red", "badge": "red",
+            "icon": ":material/scatter_plot:",
+        },
+        "Logistic Regression": {
+            "key": "compare_logreg", "color": "green", "badge": "green",
+            "icon": ":material/show_chart:",
+        },
+        "Random Forest": {
+            "key": "compare_rf", "color": "blue", "badge": "blue",
+            "icon": ":material/forest:",
+        },
+        "Decision Tree": {
+            "key": "compare_dt", "color": "orange", "badge": "orange",
+            "icon": ":material/account_tree:",
+        },
+    }
+    st.html(
+        """
+        <style>
+        .st-key-compare_knn, .st-key-compare_logreg, .st-key-compare_rf, .st-key-compare_dt {
+            border-radius: 14px !important;
+        }
+        .st-key-compare_knn {
+            background: linear-gradient(180deg, #fde8ea 0%, #ffffff 42%) !important;
+            border: 1px solid #f3b4b8 !important;
+            border-top: 6px solid #c44e52 !important;
+        }
+        .st-key-compare_logreg {
+            background: linear-gradient(180deg, #e5f6f1 0%, #ffffff 42%) !important;
+            border: 1px solid #9fd6c9 !important;
+            border-top: 6px solid #2a9d8f !important;
+        }
+        .st-key-compare_rf {
+            background: linear-gradient(180deg, #e7f1f8 0%, #ffffff 42%) !important;
+            border: 1px solid #a9c7de !important;
+            border-top: 6px solid #457b9d !important;
+        }
+        .st-key-compare_dt {
+            background: linear-gradient(180deg, #fff4d6 0%, #ffffff 42%) !important;
+            border: 1px solid #efd48a !important;
+            border-top: 6px solid #d4a017 !important;
+        }
+        .st-key-compare_knn [data-testid="stMetric"]:last-of-type,
+        .st-key-compare_logreg [data-testid="stMetric"]:last-of-type,
+        .st-key-compare_rf [data-testid="stMetric"]:last-of-type,
+        .st-key-compare_dt [data-testid="stMetric"]:last-of-type {
+            background: rgba(255,255,255,0.85);
+        }
+        </style>
+        """
+    )
+    model_cols = st.columns(4)
+    for col, (_, row) in zip(model_cols, best_df.iterrows()):
+        theme = card_theme[row["Model"]]
+        accent = theme["color"]
+        with col:
+            with st.container(border=True, key=theme["key"]):
+                st.markdown(f"{theme['icon']} :{accent}[**{row['Model']}**]")
+                with st.container(horizontal=True):
+                    st.badge(row["Pipeline"], color=theme["badge"])
+                    if row["Model"] == top_row["Model"]:
+                        st.badge("Leader", icon=":material/emoji_events:", color="orange")
+                st.metric("Accuracy", f":{accent}[{row['Accuracy']:.4f}]")
+                st.metric("Precision", f":{accent}[{row['Precision']:.4f}]")
+                st.metric("Recall", f":{accent}[{row['Recall']:.4f}]")
+                st.metric("F1-Score", f":{accent}[{row['F1-Score']:.4f}]")
+                st.metric("ROC-AUC", f":{accent}[**{row['ROC-AUC']:.4f}**]", border=True)
+
     st.dataframe(
-        best_df[["Model", "Pipeline"] + best_metric_cols].style
+        metrics_view.style
             .highlight_max(subset=best_metric_cols, color="#d4edda")
             .format({c: "{:.4f}" for c in best_metric_cols}),
         width="stretch",
         hide_index=True,
     )
-    top_row = best_df.loc[best_df["ROC-AUC"].idxmax()]
-    st.success(f"🏆 **{top_row['Model']}** ({top_row['Pipeline']}) currently leads on test ROC-AUC (**{top_row['ROC-AUC']:.4f}**).")
+    st.success(
+        f"🏆 **{top_row['Model']}** ({top_row['Pipeline']}) currently leads on test ROC-AUC (**{top_row['ROC-AUC']:.4f}**)."
+    )
 
-    st.divider()
+    acc_row = best_df.loc[best_df["Accuracy"].idxmax()]
+    rec_row = best_df.loc[best_df["Recall"].idxmax()]
+    f1_row = best_df.loc[best_df["F1-Score"].idxmax()]
+    no_share = float((y == 0).mean())
+    max_auc = float(best_df["ROC-AUC"].max())
+
+    st.subheader("📝 Conclusion & explanation")
+    with st.container(border=True):
+        st.markdown("**How to read the scores**")
+        st.markdown(
+            """
+- **Accuracy** — share of all test patients the model labelled correctly. This looks strong when most people do **not** have heart disease.
+- **Precision** — of the patients flagged as **Yes**, how many truly had disease.
+- **Recall** — of the patients who truly had disease, how many the model caught. This is the clinically important miss-rate score.
+- **F1-score** — a single balance of precision and recall.
+- **ROC-AUC** — how well the model ranks disease risk. **0.50 is chance**; 1.00 is perfect. We pick the displayed pipeline (Basic vs SMOTE) by ROC-AUC first, then accuracy.
+            """
+        )
+
+        st.markdown("**What the comparison shows**")
+        if rec_row["Model"] == f1_row["Model"]:
+            catch_line = (
+                f"- **{rec_row['Model']}** has the highest **recall ({rec_row['Recall']:.4f})** "
+                f"and **F1 ({f1_row['F1-Score']:.4f})**. That model flags more **Yes** cases, "
+                "so accuracy drops — it trades extra false alarms for fewer missed patients."
+            )
+        else:
+            catch_line = (
+                f"- **{rec_row['Model']}** has the highest **recall ({rec_row['Recall']:.4f})** "
+                f"and **{f1_row['Model']}** the highest **F1 ({f1_row['F1-Score']:.4f})**. "
+                "Those models flag more **Yes** cases, so accuracy drops — they trade extra false alarms for fewer missed patients."
+            )
+        st.markdown(
+            f"""
+- **{top_row['Model']}** ({top_row['Pipeline']}) is the overall leader because it has the highest **ROC-AUC ({top_row['ROC-AUC']:.4f})**. That is the fairest headline metric here: the dataset is imbalanced (about **{no_share:.0%} No** / **{1 - no_share:.0%} Yes**).
+- **{acc_row['Model']}** has the highest **accuracy ({acc_row['Accuracy']:.4f})**, but its **recall is only {acc_row['Recall']:.4f}**. It mostly predicts **No**, so it misses most true disease cases.
+{catch_line}
+- A dummy rule that always says **No** would already score about **{no_share:.0%} accuracy** with **0 recall**. High accuracy alone does **not** mean a useful heart-disease detector.
+            """
+        )
+
+        if max_auc < 0.55:
+            st.markdown(
+                f"""
+**In conclusion.** {top_row['Model']} is the best of these four on ranking quality, but every ROC-AUC is still near **0.50**. The models are not reliably separating Yes from No on this feature set. Treat live predictions as illustrative, not clinical decisions.
+                """
+            )
+        else:
+            st.markdown(
+                f"""
+**In conclusion.** **{top_row['Model']}** ({top_row['Pipeline']}) is the preferred model: best ROC-AUC (**{top_row['ROC-AUC']:.4f}**) under class imbalance. Still check recall if the goal is to catch disease cases rather than maximise accuracy.
+                """
+            )
 
     st.subheader("🧭 Feature Importance (Top 10)")
+    with st.container(border=True):
+        imp_knn = km.get_permutation_importance(best_results["KNN"]["best_model"], X_test, y_test).head(10)
+        coef_lr = lgm.get_coefficients(best_results["Logistic Regression"]["best_model"], X.columns.tolist()).head(10)
+        imp_rf = rfm.get_permutation_importance(best_results["Random Forest"]["best_model"], rf_X_test, rf_y_test).head(10)
+        imp_dt = dtm.get_permutation_importance(best_results["Decision Tree"]["best_model"], dt_X_test, dt_y_test).head(10)
 
-    imp_knn = km.get_permutation_importance(best_results["KNN"]["best_model"], X_test, y_test).head(10)
-    coef_lr = lgm.get_coefficients(best_results["Logistic Regression"]["best_model"], X.columns.tolist()).head(10)
-    imp_rf = rfm.get_permutation_importance(best_results["Random Forest"]["best_model"], rf_X_test, rf_y_test).head(10)
-    imp_dt = dtm.get_permutation_importance(best_results["Decision Tree"]["best_model"], dt_X_test, dt_y_test).head(10)
-
-    feature_summary = pd.DataFrame({
-        "Rank": range(1, 11),
-        "KNN": [f"{r.Feature} ({r.Importance:.3f})" for r in imp_knn.itertuples()],
-        "Logistic Regression": [f"{r.Feature} ({r.Coefficient:+.3f})" for r in coef_lr.itertuples()],
-        "Random Forest": [f"{r.Feature} ({r.Importance:.3f})" for r in imp_rf.itertuples()],
-        "Decision Tree": [f"{r.Feature} ({r.Importance:.3f})" for r in imp_dt.itertuples()],
-    })
-    st.dataframe(feature_summary, width="stretch", hide_index=True)
+        feature_summary = pd.DataFrame({
+            "Rank": range(1, 11),
+            "KNN": [f"{r.Feature} ({r.Importance:.3f})" for r in imp_knn.itertuples()],
+            "Logistic Regression": [f"{r.Feature} ({r.Coefficient:+.3f})" for r in coef_lr.itertuples()],
+            "Random Forest": [f"{r.Feature} ({r.Importance:.3f})" for r in imp_rf.itertuples()],
+            "Decision Tree": [f"{r.Feature} ({r.Importance:.3f})" for r in imp_dt.itertuples()],
+        })
+        st.dataframe(feature_summary, width="stretch", hide_index=True)
 
 
 elif page == "⚖️ Basic vs SMOTE":
