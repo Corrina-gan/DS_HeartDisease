@@ -21,8 +21,16 @@ TOP_K = 10
 sns.set_style("whitegrid")
 
 
-def run_feature_selection_check(path="heart_disease.csv", top_k=TOP_K, save_outputs=True):
-    data = run_pipeline(path)
+def run_feature_selection_check(path="heart_disease.csv", top_k=TOP_K, save_outputs=True, data=None):
+    """Run the ANOVA top-K feature-selection robustness check (report Section 5.6.5).
+
+    Pass an already-loaded ``data`` dict (as returned by
+    ``data_preprocessing.run_pipeline``) to reuse a pipeline result that was
+    computed elsewhere (e.g. cached once in a Streamlit app) instead of
+    re-running preprocessing from the raw CSV every call.
+    """
+    if data is None:
+        data = run_pipeline(path)
     X, y = data["X"], data["y"]
 
     anova_results = compute_anova_scores(X, y)
@@ -108,6 +116,9 @@ def run_feature_selection_check(path="heart_disease.csv", top_k=TOP_K, save_outp
         "y_test": y_test,
         "y_pred": y_pred,
         "y_prob": y_prob,
+        "fig_anova_scores": fig1,
+        "fig_confusion_matrix": fig2,
+        "fig_roc_curve": fig3,
     }
 
 
