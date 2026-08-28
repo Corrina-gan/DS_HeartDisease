@@ -146,11 +146,81 @@ st.html(
         font-size: 0.72rem !important;
     }
 
-    /* ---- Tabs: teal underline instead of the default red ---- */
-    button[data-baseweb="tab"] { font-weight: 600; }
-    button[data-baseweb="tab"][aria-selected="true"] { color: var(--accent-dark) !important; }
-    [data-baseweb="tab-highlight"] { background-color: var(--accent) !important; }
-    [data-baseweb="tab-border"] { background-color: var(--line) !important; }
+    /* ---- Tabs: navy + rose, not teal ---- */
+    [data-testid="stTab"] { font-weight: 600; }
+    [data-testid="stTab"][data-selected] { color: #1e3a4c !important; }
+    [data-testid="stTab"][data-selected] .react-aria-SelectionIndicator {
+        background-color: #e11d48 !important;
+    }
+
+    /* Equal-width split tabs (model / EDA / robustness category bars) */
+    .st-key-eda_category_tabs [role="tablist"],
+    .st-key-smote_model_tabs [role="tablist"],
+    .st-key-rob_category_tabs [role="tablist"] {
+        display: flex !important;
+        width: 100%;
+        gap: 0;
+        background: #ffffff;
+        border: 1px solid #d8dee6;
+        border-radius: 12px;
+        padding: 0;
+        overflow: hidden;
+    }
+    .st-key-eda_category_tabs [data-testid="stTab"],
+    .st-key-smote_model_tabs [data-testid="stTab"],
+    .st-key-rob_category_tabs [data-testid="stTab"] {
+        flex: 1 1 0 !important;
+        min-width: 0 !important;
+        justify-content: center !important;
+        height: 3.2rem !important;
+        padding: 0 0.55rem !important;
+        border-radius: 0 !important;
+        background: #f4f6f8 !important;
+        color: #5c6b7a !important;
+        font-weight: 700 !important;
+        font-size: 1.05rem !important;
+        border-right: 1px solid #d8dee6 !important;
+    }
+    .st-key-eda_category_tabs [data-testid="stTab"]:last-of-type,
+    .st-key-smote_model_tabs [data-testid="stTab"]:last-of-type,
+    .st-key-rob_category_tabs [data-testid="stTab"]:last-of-type {
+        border-right: none !important;
+    }
+    .st-key-eda_category_tabs [data-testid="stTab"] [data-testid="stMarkdownContainer"],
+    .st-key-smote_model_tabs [data-testid="stTab"] [data-testid="stMarkdownContainer"],
+    .st-key-rob_category_tabs [data-testid="stTab"] [data-testid="stMarkdownContainer"],
+    .st-key-eda_category_tabs [data-testid="stTab"] [data-testid="stMarkdownContainer"] p,
+    .st-key-smote_model_tabs [data-testid="stTab"] [data-testid="stMarkdownContainer"] p,
+    .st-key-rob_category_tabs [data-testid="stTab"] [data-testid="stMarkdownContainer"] p,
+    .st-key-eda_category_tabs [data-testid="stTab"] [data-testid="stIconMaterial"],
+    .st-key-smote_model_tabs [data-testid="stTab"] [data-testid="stIconMaterial"],
+    .st-key-rob_category_tabs [data-testid="stTab"] [data-testid="stIconMaterial"] {
+        font-size: inherit !important;
+        font-weight: 700 !important;
+        color: inherit !important;
+        text-align: center;
+        width: 100%;
+    }
+    .st-key-eda_category_tabs [data-testid="stTab"][data-hovered]:not([data-selected]),
+    .st-key-smote_model_tabs [data-testid="stTab"][data-hovered]:not([data-selected]),
+    .st-key-rob_category_tabs [data-testid="stTab"][data-hovered]:not([data-selected]) {
+        background: #e8edf2 !important;
+        color: #1e3a4c !important;
+    }
+    .st-key-eda_category_tabs [data-testid="stTab"][data-selected],
+    .st-key-smote_model_tabs [data-testid="stTab"][data-selected],
+    .st-key-rob_category_tabs [data-testid="stTab"][data-selected],
+    .st-key-eda_category_tabs [data-testid="stTab"][aria-selected="true"],
+    .st-key-smote_model_tabs [data-testid="stTab"][aria-selected="true"],
+    .st-key-rob_category_tabs [data-testid="stTab"][aria-selected="true"] {
+        background: #1e3a4c !important;
+        color: #ffffff !important;
+    }
+    .st-key-eda_category_tabs [data-testid="stTab"] .react-aria-SelectionIndicator,
+    .st-key-smote_model_tabs [data-testid="stTab"] .react-aria-SelectionIndicator,
+    .st-key-rob_category_tabs [data-testid="stTab"] .react-aria-SelectionIndicator {
+        display: none !important;
+    }
 
     /* ---- Expanders and bordered containers: shared card radius ---- */
     [data-testid="stExpander"] {
@@ -262,6 +332,27 @@ def pick_recommended_model(df):
     rf_rows = df[df["Model"] == "Random Forest"]
     recommended_row = rf_rows.iloc[0] if not rf_rows.empty else auc_leader_row
     return recommended_row, auc_leader_row
+
+
+_METRIC_KPI_SPEC = [
+    ("acc", "green", ":material/verified:", "Accuracy"),
+    ("prec", "red", ":material/filter_alt:", "Precision"),
+    ("rec", "blue", ":material/track_changes:", "Recall"),
+    ("f1", "orange", ":material/balance:", "F1-Score"),
+    ("auc", "green", ":material/monitoring:", "ROC-AUC"),
+]
+
+
+def render_smote_delta_kpis(prefix, row, delta_fn):
+    """Five colored metric cards. `row` is the displayed pipeline; the pill is SMOTE − Basic."""
+    for col, (suffix, color, icon, label) in zip(st.columns(5), _METRIC_KPI_SPEC):
+        with col:
+            with st.container(border=True, key=f"{prefix}_{suffix}"):
+                st.metric(
+                    f"{icon} {label}",
+                    f":{color}[**{row[label]:.4f}**]",
+                    f"{delta_fn(label):.4f}",
+                )
 
 
 @st.cache_data(show_spinner="Loading & preprocessing data...")
@@ -833,82 +924,173 @@ if page == "🏠 Home (Predict & Overview)":
 
 elif page == "🔍 EDA":
     st.title("🔍 Exploratory Data Analysis")
-    st.markdown("Explore the underlying patterns in the raw dataset before any cleaning or encoding.")
-
-    st.subheader("📊 Dataset Snapshot")
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Total Patient Records", f"{raw_df.shape[0]:,}")
-    c2.metric("Total Attributes", raw_df.shape[1])
-    c3.metric("Numeric Features", len(numeric_cols))
-    c4.metric("Categorical Features", len(categorical_cols))
-
-    snap_col1, snap_col2 = st.columns([1, 1.5])
-    with snap_col1:
-        st.markdown("**Target Class Balance**")
-        st.pyplot(dv.plot_class_distribution(raw_df))
-    with snap_col2:
-        st.markdown("**Sample Patient Records (Raw Data)**")
-        st.dataframe(raw_df.head(15), width="stretch")
-
-    st.divider()
+    st.caption(
+        "Raw data only — before imputation, encoding, or modelling. "
+        "Use the snapshot, then open a category tab."
+    )
 
     eda_figs = prefetch_eda_plots(raw_df, numeric_cols, categorical_cols)
     outlier_df, table_numeric, table_categorical, fig_assoc, mcar_df, fig_mcar, fig_corr, anova_df, chi2_df = prefetch_stats(raw_df, numeric_cols, categorical_cols, X, y)
 
-    eda_tab1, eda_tab2, eda_tab3 = st.tabs([
-        "📊 Distributions",
-        "🎯 Target Associations",
-        "🔬 Data Quality & Outliers"
-    ])
+    st.subheader(":material/database: Dataset snapshot")
+    st.caption(
+        "10,000 patients and 21 columns (9 numeric, 11 categorical, plus Heart Disease Status)."
+    )
+    st.html(
+        """
+        <style>
+        .st-key-snap_records, .st-key-snap_attrs, .st-key-snap_numeric, .st-key-snap_cat,
+        .st-key-snap_balance, .st-key-snap_sample {
+            border-radius: 14px !important;
+        }
+        .st-key-snap_records {
+            background: linear-gradient(180deg, #e5f6f1 0%, #ffffff 55%) !important;
+            border: 1px solid #9fd6c9 !important;
+            border-top: 6px solid #0f766e !important;
+        }
+        .st-key-snap_attrs {
+            background: linear-gradient(180deg, #fde8ea 0%, #ffffff 55%) !important;
+            border: 1px solid #f3b4b8 !important;
+            border-top: 6px solid #e11d48 !important;
+        }
+        .st-key-snap_numeric {
+            background: linear-gradient(180deg, #e7f1f8 0%, #ffffff 55%) !important;
+            border: 1px solid #a9c7de !important;
+            border-top: 6px solid #457b9d !important;
+        }
+        .st-key-snap_cat {
+            background: linear-gradient(180deg, #fff4d6 0%, #ffffff 55%) !important;
+            border: 1px solid #efd48a !important;
+            border-top: 6px solid #d4a017 !important;
+        }
+        .st-key-snap_balance, .st-key-snap_sample {
+            background: #ffffff !important;
+            border: 1px solid #e2e8f0 !important;
+        }
+        </style>
+        """
+    )
+    snapshot_kpis = [
+        ("snap_records", "green", ":material/groups:", "Total Patient Records", f"{raw_df.shape[0]:,}"),
+        ("snap_attrs", "red", ":material/view_column:", "Total Attributes", f"{raw_df.shape[1]}"),
+        ("snap_numeric", "blue", ":material/pin:", "Numeric Features", f"{len(numeric_cols)}"),
+        ("snap_cat", "orange", ":material/category:", "Categorical Features", f"{len(categorical_cols)}"),
+    ]
+    for col, (key, color, icon, label, value) in zip(st.columns(4), snapshot_kpis):
+        with col:
+            with st.container(border=True, key=key):
+                st.metric(f"{icon} {label}", f":{color}[**{value}**]")
+
+    target_counts = raw_df[dp.TARGET_COL].value_counts()
+    no_n = int(target_counts.get("No", 0))
+    yes_n = int(target_counts.get("Yes", 0))
+    n_total = max(no_n + yes_n, 1)
+
+    snap_col1, snap_col2 = st.columns([1, 1.5])
+    with snap_col1:
+        with st.container(border=True, key="snap_balance"):
+            st.markdown("**Target class balance**")
+            st.caption("About 4 in 5 patients have no recorded heart disease. Accuracy will look high if a model always predicts No.")
+            with st.container(horizontal=True):
+                st.badge(f"No  {no_n / n_total:.0%}", color="green")
+                st.badge(f"Yes  {yes_n / n_total:.0%}", color="red")
+            st.pyplot(eda_figs["class_dist"])
+    with snap_col2:
+        with st.container(border=True, key="snap_sample"):
+            st.markdown("**Sample patient records (raw data)**")
+            st.caption("First 15 rows, still uncleaned: original labels, missing cells, and mixed types.")
+            st.dataframe(raw_df.head(15), width="stretch", hide_index=True, height=360)
+
+    with st.container(key="eda_category_tabs"):
+        eda_tab1, eda_tab2, eda_tab3 = st.tabs([
+            ":material/bar_chart: **Distributions**",
+            ":material/favorite: **Target associations**",
+            ":material/health_and_safety: **Data quality & outliers**",
+        ])
 
     with eda_tab1:
-        st.subheader("Feature & Class Distributions")
+        st.subheader("Feature distributions")
+        st.caption("How each raw field is filled, before any cleaning.")
 
-        col_c1, col_c2 = st.columns([1, 1.5])
-        with col_c1:
-            st.pyplot(eda_figs["class_dist"])
-        with col_c2:
+        with st.container(border=True):
+            st.markdown("**Categorical features**")
+            st.caption(
+                "How evenly are lifestyle and clinical categories filled? "
+                "Real clinic data is usually skewed; unusually even bars are a clue the file may be synthetic."
+            )
             st.pyplot(eda_figs["cat_dist"])
 
-        st.divider()
-        st.pyplot(eda_figs["num_dist"])
+        with st.container(border=True):
+            st.markdown("**Numeric features**")
+            st.caption(
+                "What shape do Age, BMI, cholesterol, and the other numeric fields have? "
+                "A flat histogram (instead of a bell curve) is unusual for real patient measurements."
+            )
+            st.pyplot(eda_figs["num_dist"])
 
     with eda_tab2:
-        st.subheader("How Features Relate to Heart Disease")
+        st.subheader("How features relate to heart disease")
+        st.caption(
+            "Does any predictor actually separate Yes from No? "
+            "Small association statistics mean a classifier has almost nothing to learn."
+        )
 
-        st.pyplot(fig_assoc)
+        with st.container(border=True):
+            st.markdown("**Association tests**")
+            st.caption("Point-biserial r (numeric) and Cramér's V (categorical). Values near 0 mean no useful link with the target.")
+            st.pyplot(fig_assoc)
+            colA, colB = st.columns(2)
+            colA.markdown("**Numeric (point-biserial r)**")
+            colA.dataframe(table_numeric, width="stretch")
+            colB.markdown("**Categorical (Cramér's V)**")
+            colB.dataframe(table_categorical, width="stretch")
 
-        colA, colB = st.columns(2)
-        colA.markdown("**Numeric (Point-Biserial r)**")
-        colA.dataframe(table_numeric, width="stretch")
-        colB.markdown("**Categorical (Cramer's V)**")
-        colB.dataframe(table_categorical, width="stretch")
+        with st.container(border=True):
+            st.markdown("**Numeric features split by target**")
+            st.caption("If a field predicted disease, the Yes and No boxes would sit at different levels. Overlapping boxes mean the two groups look the same.")
+            st.pyplot(eda_figs["num_by_target"])
 
-        st.divider()
-        st.pyplot(eda_figs["num_by_target"])
-        st.pyplot(eda_figs["cat_rate"])
+        with st.container(border=True):
+            st.markdown("**Disease rate by category**")
+            st.caption("Share of Yes within each category. If every bar is near the overall 20% rate, that category does not change risk.")
+            st.pyplot(eda_figs["cat_rate"])
 
     with eda_tab3:
-        st.subheader("Correlations & Normality")
+        st.subheader("Data quality & outliers")
+        st.caption("Duplicates, unusual shape, correlations, and extreme values in the raw file.")
 
-        st.pyplot(eda_figs["corr_heat"])
-        st.pyplot(eda_figs["qq_plots"])
+        with st.container(border=True):
+            st.markdown("**Structural quality**")
+            st.caption("Duplicate rows or messy category labels would be a data problem, not a modelling problem.")
+            n_dupes, unique_values_df = dv.check_data_quality(raw_df, categorical_cols)
+            if n_dupes == 0:
+                st.success("No duplicate records found across all 10,000 rows.")
+            else:
+                st.warning(f"{n_dupes} duplicate record(s) found.")
+            with st.expander("Unique values per categorical / binary attribute"):
+                st.dataframe(unique_values_df, width="stretch", hide_index=True)
 
-        st.divider()
-        st.subheader("Outlier Detection (1.5× IQR)")
-        st.pyplot(eda_figs["outliers"])
-        with st.expander("📂 View Exact Outlier Counts"):
-            st.dataframe(outlier_df, width="stretch")
+        with st.container(border=True):
+            st.markdown("**Numeric correlations**")
+            st.caption("Near-zero correlations mean little redundancy — and little shared clinical structure.")
+            st.pyplot(eda_figs["corr_heat"])
 
-        st.divider()
-        st.subheader("Structural Data Quality")
-        n_dupes, unique_values_df = dv.check_data_quality(raw_df, categorical_cols)
-        if n_dupes == 0:
-            st.success("No duplicate records found across all 10,000 rows.")
-        else:
-            st.warning(f"{n_dupes} duplicate record(s) found.")
-        with st.expander("📂 View unique values per categorical / binary attribute"):
-            st.dataframe(unique_values_df, width="stretch", hide_index=True)
+        with st.container(border=True):
+            st.markdown("**QQ-plots versus a uniform distribution**")
+            st.caption("If points sit on the diagonal, the numeric field matches a flat uniform shape, matching the histograms.")
+            st.pyplot(eda_figs["qq_plots"])
+
+        with st.container(border=True):
+            st.markdown("**Outlier check (1.5× IQR)**")
+            st.caption("On roughly uniform variables, whiskers span most of the range, so extreme tails are limited.")
+            st.pyplot(eda_figs["outliers"])
+            with st.expander("Exact outlier counts"):
+                st.dataframe(outlier_df, width="stretch")
+
+    st.info(
+        "Missing-value handling, encoding, and the post-encoding ANOVA / chi-square tables are on **🧹 Preprocessing**.",
+        icon=":material/arrow_forward:",
+    )
 
 
 elif page == "🧹 Preprocessing":
@@ -1098,7 +1280,42 @@ elif page == "📊 Model Comparison":
 elif page == "⚖️ Basic vs SMOTE":
     st.title("⚖️ Basic vs SMOTE")
 
-    model_tabs = st.tabs(["K-Nearest Neighbors (KNN)", "Logistic Regression", "Random Forest", "Decision Tree"])
+    st.html(
+        """
+        <style>
+        .st-key-knn_acc, .st-key-knn_prec, .st-key-knn_rec, .st-key-knn_f1, .st-key-knn_auc,
+        .st-key-lr_acc, .st-key-lr_prec, .st-key-lr_rec, .st-key-lr_f1, .st-key-lr_auc,
+        .st-key-rf_acc, .st-key-rf_prec, .st-key-rf_rec, .st-key-rf_f1, .st-key-rf_auc,
+        .st-key-dt_acc, .st-key-dt_prec, .st-key-dt_rec, .st-key-dt_f1, .st-key-dt_auc {
+            border-radius: 14px !important;
+        }
+        .st-key-knn_acc, .st-key-lr_acc, .st-key-rf_acc, .st-key-dt_acc,
+        .st-key-knn_auc, .st-key-lr_auc, .st-key-rf_auc, .st-key-dt_auc {
+            background: linear-gradient(180deg, #e5f6f1 0%, #ffffff 55%) !important;
+            border: 1px solid #9fd6c9 !important;
+            border-top: 6px solid #0f766e !important;
+        }
+        .st-key-knn_prec, .st-key-lr_prec, .st-key-rf_prec, .st-key-dt_prec {
+            background: linear-gradient(180deg, #fde8ea 0%, #ffffff 55%) !important;
+            border: 1px solid #f3b4b8 !important;
+            border-top: 6px solid #e11d48 !important;
+        }
+        .st-key-knn_rec, .st-key-lr_rec, .st-key-rf_rec, .st-key-dt_rec {
+            background: linear-gradient(180deg, #e7f1f8 0%, #ffffff 55%) !important;
+            border: 1px solid #a9c7de !important;
+            border-top: 6px solid #457b9d !important;
+        }
+        .st-key-knn_f1, .st-key-lr_f1, .st-key-rf_f1, .st-key-dt_f1 {
+            background: linear-gradient(180deg, #fff4d6 0%, #ffffff 55%) !important;
+            border: 1px solid #efd48a !important;
+            border-top: 6px solid #d4a017 !important;
+        }
+        </style>
+        """
+    )
+
+    with st.container(key="smote_model_tabs"):
+        model_tabs = st.tabs(["K-Nearest Neighbors (KNN)", "Logistic Regression", "Random Forest", "Decision Tree"])
 
     all_trained = train_all_models(X, y)
 
@@ -1140,16 +1357,9 @@ elif page == "⚖️ Basic vs SMOTE":
         smote = results_df.iloc[1]
 
         def get_delta(metric):
-
             return float(smote[metric] - basic[metric])
 
-
-        c1, c2, c3, c4, c5 = st.columns(5)
-        c1.metric("Accuracy", f"{basic['Accuracy']:.4f}", f"{get_delta('Accuracy'):.4f}")
-        c2.metric("Precision", f"{basic['Precision']:.4f}", f"{get_delta('Precision'):.4f}")
-        c3.metric("Recall", f"{basic['Recall']:.4f}", f"{get_delta('Recall'):.4f}")
-        c4.metric("F1-Score", f"{basic['F1-Score']:.4f}", f"{get_delta('F1-Score'):.4f}")
-        c5.metric("ROC-AUC", f"{basic['ROC-AUC']:.4f}", f"{get_delta('ROC-AUC'):.4f}")
+        render_smote_delta_kpis("knn", basic, get_delta)
 
         st.divider()
 
@@ -1254,12 +1464,7 @@ elif page == "⚖️ Basic vs SMOTE":
         def get_delta_lr(metric):
             return float(lr_smote_row[metric] - lr_basic_row[metric])
 
-        c1, c2, c3, c4, c5 = st.columns(5)
-        c1.metric("Accuracy", f"{lr_smote_row['Accuracy']:.4f}", f"{get_delta_lr('Accuracy'):.4f}")
-        c2.metric("Precision", f"{lr_smote_row['Precision']:.4f}", f"{get_delta_lr('Precision'):.4f}")
-        c3.metric("Recall", f"{lr_smote_row['Recall']:.4f}", f"{get_delta_lr('Recall'):.4f}")
-        c4.metric("F1-Score", f"{lr_smote_row['F1-Score']:.4f}", f"{get_delta_lr('F1-Score'):.4f}")
-        c5.metric("ROC-AUC", f"{lr_smote_row['ROC-AUC']:.4f}", f"{get_delta_lr('ROC-AUC'):.4f}")
+        render_smote_delta_kpis("lr", lr_smote_row, get_delta_lr)
 
         st.divider()
 
@@ -1364,12 +1569,7 @@ elif page == "⚖️ Basic vs SMOTE":
         def get_rf_delta(metric):
             return float(rf_smote[metric] - rf_basic[metric])
 
-        r1, r2, r3, r4, r5 = st.columns(5)
-        r1.metric("Accuracy", f"{rf_smote['Accuracy']:.4f}", f"{get_rf_delta('Accuracy'):.4f}")
-        r2.metric("Precision", f"{rf_smote['Precision']:.4f}", f"{get_rf_delta('Precision'):.4f}")
-        r3.metric("Recall", f"{rf_smote['Recall']:.4f}", f"{get_rf_delta('Recall'):.4f}")
-        r4.metric("F1-Score", f"{rf_smote['F1-Score']:.4f}", f"{get_rf_delta('F1-Score'):.4f}")
-        r5.metric("ROC-AUC", f"{rf_smote['ROC-AUC']:.4f}", f"{get_rf_delta('ROC-AUC'):.4f}")
+        render_smote_delta_kpis("rf", rf_smote, get_rf_delta)
 
         st.divider()
 
@@ -1471,12 +1671,7 @@ elif page == "⚖️ Basic vs SMOTE":
         def get_dt_delta(metric):
             return float(dt_smote[metric] - dt_basic[metric])
 
-        d1, d2, d3, d4, d5 = st.columns(5)
-        d1.metric("Accuracy", f"{dt_smote['Accuracy']:.4f}", f"{get_dt_delta('Accuracy'):.4f}")
-        d2.metric("Precision", f"{dt_smote['Precision']:.4f}", f"{get_dt_delta('Precision'):.4f}")
-        d3.metric("Recall", f"{dt_smote['Recall']:.4f}", f"{get_dt_delta('Recall'):.4f}")
-        d4.metric("F1-Score", f"{dt_smote['F1-Score']:.4f}", f"{get_dt_delta('F1-Score'):.4f}")
-        d5.metric("ROC-AUC", f"{dt_smote['ROC-AUC']:.4f}", f"{get_dt_delta('ROC-AUC'):.4f}")
+        render_smote_delta_kpis("dt", dt_smote, get_dt_delta)
 
         st.divider()
 
@@ -1578,64 +1773,148 @@ elif page == "⚖️ Basic vs SMOTE":
 
 elif page == "🔬 Robustness & Feature Selection":
     st.title("🔬 Robustness & Feature Selection")
-    st.markdown(
+    st.caption(
         "Section 5.6 of the report: checks whether the near-chance ROC-AUC (≈0.49–0.52) "
         "seen in every model is a tuning artefact, or a real limit of the data."
     )
 
-    rob_tab1, rob_tab2, rob_tab3 = st.tabs([
-        "⚙️ Scoring, Threshold & Grid Checks",
-        "🎯 Feature Selection (ANOVA Top-10)",
-        "🧬 Dimensionality Reduction (PCA)",
-    ])
+    full_rf_auc = all_results["Random Forest"]["metrics"]["ROC-AUC"]
+
+    st.html(
+        """
+        <style>
+        .st-key-fs_acc, .st-key-fs_prec, .st-key-fs_rec, .st-key-fs_f1, .st-key-fs_auc,
+        .st-key-pca_orig, .st-key-pca_comp, .st-key-pca_auc,
+        .st-key-fs_anova_chart, .st-key-fs_anova_table, .st-key-fs_cm, .st-key-fs_roc,
+        .st-key-rob_chart, .st-key-rob_table, .st-key-pca_var, .st-key-pca_cm, .st-key-pca_roc {
+            border-radius: 14px !important;
+        }
+        .st-key-fs_acc, .st-key-pca_orig {
+            background: linear-gradient(180deg, #e5f6f1 0%, #ffffff 55%) !important;
+            border: 1px solid #9fd6c9 !important;
+            border-top: 6px solid #0f766e !important;
+        }
+        .st-key-fs_prec {
+            background: linear-gradient(180deg, #fde8ea 0%, #ffffff 55%) !important;
+            border: 1px solid #f3b4b8 !important;
+            border-top: 6px solid #e11d48 !important;
+        }
+        .st-key-fs_rec, .st-key-pca_comp {
+            background: linear-gradient(180deg, #e7f1f8 0%, #ffffff 55%) !important;
+            border: 1px solid #a9c7de !important;
+            border-top: 6px solid #457b9d !important;
+        }
+        .st-key-fs_f1 {
+            background: linear-gradient(180deg, #fff4d6 0%, #ffffff 55%) !important;
+            border: 1px solid #efd48a !important;
+            border-top: 6px solid #d4a017 !important;
+        }
+        .st-key-fs_auc, .st-key-pca_auc {
+            background: linear-gradient(180deg, #e5f6f1 0%, #ffffff 55%) !important;
+            border: 1px solid #9fd6c9 !important;
+            border-top: 6px solid #0f766e !important;
+        }
+        .st-key-fs_anova_chart, .st-key-fs_anova_table, .st-key-fs_cm, .st-key-fs_roc,
+        .st-key-rob_chart, .st-key-rob_table, .st-key-pca_var, .st-key-pca_cm, .st-key-pca_roc {
+            background: #ffffff !important;
+            border: 1px solid #e2e8f0 !important;
+        }
+        .st-key-fs_kpi_row [data-testid="stHorizontalBlock"],
+        .st-key-pca_kpi_row [data-testid="stHorizontalBlock"] {
+            align-items: stretch !important;
+        }
+        .st-key-fs_kpi_row [data-testid="stColumn"],
+        .st-key-pca_kpi_row [data-testid="stColumn"] {
+            display: flex !important;
+            flex-direction: column !important;
+        }
+        .st-key-fs_kpi_row [data-testid="stColumn"] > div,
+        .st-key-pca_kpi_row [data-testid="stColumn"] > div,
+        .st-key-fs_acc, .st-key-fs_prec, .st-key-fs_rec, .st-key-fs_f1, .st-key-fs_auc,
+        .st-key-pca_orig, .st-key-pca_comp, .st-key-pca_auc {
+            height: 100% !important;
+            flex: 1 1 auto !important;
+        }
+        .st-key-fs_kpi_row [data-testid="stVerticalBlockBorderWrapper"],
+        .st-key-pca_kpi_row [data-testid="stVerticalBlockBorderWrapper"],
+        .st-key-fs_kpi_row [data-testid="stVerticalBlockBorderWrapper"] > div,
+        .st-key-pca_kpi_row [data-testid="stVerticalBlockBorderWrapper"] > div {
+            height: 100% !important;
+            min-height: 11.5rem !important;
+        }
+        .st-key-fs_kpi_row [data-testid="stMetric"],
+        .st-key-pca_kpi_row [data-testid="stMetric"] {
+            height: 100% !important;
+            box-sizing: border-box !important;
+        }
+        </style>
+        """
+    )
+
+    with st.container(key="rob_category_tabs"):
+        rob_tab1, rob_tab2, rob_tab3 = st.tabs([
+            "⚙️ Scoring, Threshold & Grid Checks",
+            "🎯 Feature Selection (ANOVA Top-10)",
+            "🧬 Dimensionality Reduction (PCA)",
+        ])
 
     with rob_tab1:
         robustness_df = run_robustness_checks(X, y)
-
-        st.subheader("📈 ROC-AUC Across All Checks")
-        st.pyplot(plot_robustness_roc_auc(robustness_df))
-
-        st.divider()
-
-        st.subheader("📋 Full Results")
         metric_cols = ["Accuracy", "Precision", "Recall", "F1-Score", "ROC-AUC"]
-        st.dataframe(
-            robustness_df.style.format({c: "{:.4f}" for c in metric_cols}),
-            width="stretch",
-            hide_index=True,
-        )
+
+        with st.container(border=True, key="rob_chart"):
+            st.markdown("**ROC-AUC across all checks**")
+            st.caption("If every check stays near 0.50, the weak result is not from one scoring choice or threshold.")
+            st.pyplot(plot_robustness_roc_auc(robustness_df))
+
+        with st.container(border=True, key="rob_table"):
+            st.markdown("**Full results**")
+            st.dataframe(
+                robustness_df.style.format({c: "{:.4f}" for c in metric_cols}),
+                width="stretch",
+                hide_index=True,
+            )
 
     with rob_tab2:
         st.subheader("Random Forest retrained on the top 10 ANOVA-ranked features")
         st.caption("Report Section 5.6.5 / Table 5.5 — does trimming to the strongest-scoring predictors change anything?")
         fs_result = with_spinner("Retraining Random Forest on the top 10 ANOVA features...", get_feature_selection_result, X, y)
 
-        fs_m1, fs_m2, fs_m3, fs_m4, fs_m5 = st.columns(5)
-        fs_m1.metric("Accuracy", f"{fs_result['metrics']['Accuracy']:.4f}")
-        fs_m2.metric("Precision", f"{fs_result['metrics']['Precision']:.4f}")
-        fs_m3.metric("Recall", f"{fs_result['metrics']['Recall']:.4f}")
-        fs_m4.metric("F1-Score", f"{fs_result['metrics']['F1-Score']:.4f}")
-        full_rf_auc = all_results["Random Forest"]["metrics"]["ROC-AUC"]
-        fs_m5.metric(
-            "ROC-AUC", f"{fs_result['metrics']['ROC-AUC']:.4f}",
-            f"{fs_result['metrics']['ROC-AUC'] - full_rf_auc:+.4f} vs full-feature RF",
-        )
+        fs_metrics = fs_result["metrics"]
+        auc_delta = fs_metrics["ROC-AUC"] - full_rf_auc
+        fs_kpis = [
+            ("fs_acc", "green", ":material/verified:", "Accuracy", f"{fs_metrics['Accuracy']:.4f}", None),
+            ("fs_prec", "red", ":material/filter_alt:", "Precision", f"{fs_metrics['Precision']:.4f}", None),
+            ("fs_rec", "blue", ":material/track_changes:", "Recall", f"{fs_metrics['Recall']:.4f}", None),
+            ("fs_f1", "orange", ":material/balance:", "F1-Score", f"{fs_metrics['F1-Score']:.4f}", None),
+            ("fs_auc", "green", ":material/monitoring:", "ROC-AUC", f"{fs_metrics['ROC-AUC']:.4f}", f"{auc_delta:+.4f} vs full-feature RF"),
+        ]
+        with st.container(key="fs_kpi_row"):
+            for col, (key, color, icon, label, value, delta) in zip(st.columns(5), fs_kpis):
+                with col:
+                    with st.container(border=True, key=key):
+                        st.metric(f"{icon} {label}", f":{color}[**{value}**]", delta)
 
         fs_col1, fs_col2 = st.columns([1.3, 1])
         with fs_col1:
-            st.pyplot(fs_result["fig_anova_scores"])
+            with st.container(border=True, key="fs_anova_chart"):
+                st.markdown("**Top 10 features by ANOVA F-score**")
+                st.pyplot(fs_result["fig_anova_scores"])
         with fs_col2:
-            st.markdown("**Top 10 features by ANOVA F-score**")
-            st.dataframe(fs_result["anova_results"].head(10), width="stretch", hide_index=True)
+            with st.container(border=True, key="fs_anova_table"):
+                st.markdown("**Top 10 features by ANOVA F-score**")
+                st.dataframe(fs_result["anova_results"].head(10), width="stretch", hide_index=True)
 
         fs_col3, fs_col4 = st.columns(2)
         with fs_col3:
-            st.pyplot(fs_result["fig_confusion_matrix"])
+            with st.container(border=True, key="fs_cm"):
+                st.pyplot(fs_result["fig_confusion_matrix"])
         with fs_col4:
-            st.pyplot(fs_result["fig_roc_curve"])
+            with st.container(border=True, key="fs_roc"):
+                st.pyplot(fs_result["fig_roc_curve"])
 
         st.info(
-            f"ROC-AUC stays at **{fs_result['metrics']['ROC-AUC']:.4f}**, essentially unchanged from the "
+            f"ROC-AUC stays at **{fs_metrics['ROC-AUC']:.4f}**, essentially unchanged from the "
             f"full-feature Random Forest (**{full_rf_auc:.4f}**). Trimming to the 10 strongest-scoring "
             "predictors neither helps nor hurts — the signal simply isn't there to find."
         )
@@ -1645,21 +1924,28 @@ elif page == "🔬 Robustness & Feature Selection":
         st.caption("Report Section 5.6.6 / Figure 5.18 — is redundancy between features hiding the signal?")
         pca_result = with_spinner("Fitting PCA and retraining Random Forest on the reduced features...", get_pca_result, X, y)
 
-        pca_m1, pca_m2, pca_m3 = st.columns(3)
-        pca_m1.metric("Original features", pca_result["metrics"]["Original Features"])
-        pca_m2.metric("Components for 95% variance", pca_result["metrics"]["PCA Components"])
-        pca_m3.metric(
-            "ROC-AUC", f"{pca_result['metrics']['ROC-AUC']:.4f}",
-            f"{pca_result['metrics']['ROC-AUC'] - full_rf_auc:+.4f} vs full-feature RF",
-        )
+        pca_auc_delta = pca_result["metrics"]["ROC-AUC"] - full_rf_auc
+        pca_kpis = [
+            ("pca_orig", "green", ":material/view_column:", "Original features", f"{pca_result['metrics']['Original Features']}", None),
+            ("pca_comp", "blue", ":material/tune:", "Components for 95% variance", f"{pca_result['metrics']['PCA Components']}", None),
+            ("pca_auc", "green", ":material/monitoring:", "ROC-AUC", f"{pca_result['metrics']['ROC-AUC']:.4f}", f"{pca_auc_delta:+.4f} vs full-feature RF"),
+        ]
+        with st.container(key="pca_kpi_row"):
+            for col, (key, color, icon, label, value, delta) in zip(st.columns(3), pca_kpis):
+                with col:
+                    with st.container(border=True, key=key):
+                        st.metric(f"{icon} {label}", f":{color}[**{value}**]", delta)
 
-        st.pyplot(pca_result["fig_explained_variance"])
+        with st.container(border=True, key="pca_var"):
+            st.pyplot(pca_result["fig_explained_variance"])
 
         pca_col1, pca_col2 = st.columns(2)
         with pca_col1:
-            st.pyplot(pca_result["fig_confusion_matrix"])
+            with st.container(border=True, key="pca_cm"):
+                st.pyplot(pca_result["fig_confusion_matrix"])
         with pca_col2:
-            st.pyplot(pca_result["fig_roc_curve"])
+            with st.container(border=True, key="pca_roc"):
+                st.pyplot(pca_result["fig_roc_curve"])
 
         st.info(
             f"{pca_result['metrics']['PCA Components']} of {pca_result['metrics']['Original Features']} "
