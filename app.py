@@ -4,6 +4,7 @@ import os
 import joblib
 import numpy as np
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 import matplotlib.pyplot as plt
 from sklearn.model_selection import cross_val_predict, StratifiedKFold
@@ -25,8 +26,178 @@ import knn as km
 import decision_tree as dtm
 import logistic_regression as lgm
 import random_forest as rfm
+import feature_selection_check as fscm
+import pca_check as pcam
 
 st.set_page_config(page_title="Heart Disease Risk", layout="wide", page_icon="\u2764\ufe0f")
+
+st.html(
+    """
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+    :root {
+        --accent: #0f766e;
+        --accent-dark: #0b5b54;
+        --accent-soft: #e6f4f2;
+        --pulse: #e11d48;
+        --ink: #16232b;
+        --muted: #64748b;
+        --line: #e2e8f0;
+        --card-radius: 14px;
+    }
+
+    /* ---- Typography: one clean face everywhere ---- */
+    html, body, [data-testid="stAppViewContainer"], [data-testid="stSidebar"],
+    input, textarea, select, button {
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
+    }
+
+    /* ---- Canvas: soft neutral instead of stark white ---- */
+    [data-testid="stAppViewContainer"] { background: #f8fafa; }
+    [data-testid="stHeader"] { background: rgba(0,0,0,0); }
+    .block-container { padding-top: 1.6rem; max-width: 1200px; }
+
+    /* ---- Masthead: thin signature gradient bar, ties the two accent
+       colors together at the very top of the page ---- */
+    [data-testid="stDecoration"] {
+        background: linear-gradient(90deg, var(--accent) 0%, var(--pulse) 100%) !important;
+    }
+
+    /* ---- Sidebar ---- */
+    [data-testid="stSidebar"] {
+        background: #f1f5f4;
+        border-right: 1px solid var(--line);
+    }
+    [data-testid="stSidebar"] .stRadio label { font-size: 0.95rem; }
+    [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p {
+        color: var(--muted);
+    }
+    /* Bug fix: Streamlit wraps each radio option's label text in its own
+       <p>, and an explicit color on that <p> always wins over an inherited
+       color from the ancestor <label> — so the label-level color rules
+       below never actually reached the visible text. That made every
+       unchecked nav item render in low-contrast muted gray on a near-white
+       row (illegible). Target the <p> itself, at higher specificity than
+       the blanket muted-text rule above. */
+    [data-testid="stSidebar"] div[role="radiogroup"] label [data-testid="stMarkdownContainer"] p {
+        color: var(--ink) !important;
+        font-weight: 500;
+    }
+    [data-testid="stSidebar"] div[role="radiogroup"] label:hover [data-testid="stMarkdownContainer"] p {
+        color: var(--accent-dark) !important;
+    }
+    [data-testid="stSidebar"] div[role="radiogroup"] label:has(input:checked) [data-testid="stMarkdownContainer"] p {
+        color: #ffffff !important;
+        font-weight: 700;
+    }
+    /* Sidebar nav: hide the bare radio circle, style each option as a
+       full-width row/pill so it reads as a menu, not a form field. */
+    [data-testid="stSidebar"] div[role="radiogroup"] label > div:first-child {
+        display: none !important;
+    }
+    [data-testid="stSidebar"] div[role="radiogroup"] label {
+        display: flex;
+        align-items: center;
+        width: 100%;
+        padding: 10px 14px;
+        margin-bottom: 6px;
+        border-radius: 10px;
+        background-color: rgba(0, 0, 0, 0.025);
+        transition: background 0.15s ease, color 0.15s ease;
+        cursor: pointer;
+        font-weight: 500;
+    }
+    [data-testid="stSidebar"] div[role="radiogroup"] label:hover {
+        background-color: var(--accent-soft) !important;
+        color: var(--accent-dark) !important;
+    }
+    [data-testid="stSidebar"] div[role="radiogroup"] label:has(input:checked) {
+        background-color: var(--accent) !important;
+        color: #ffffff !important;
+        font-weight: 700;
+    }
+
+    /* ---- Headings: one consistent accent, with real breathing room
+       between sections instead of Streamlit's default cramped rhythm ---- */
+    h1, h2, h3 {
+        color: var(--ink) !important;
+        letter-spacing: -0.01em;
+        font-weight: 800 !important;
+    }
+    h1 { font-size: 2.3rem !important; border-bottom: 3px solid var(--accent); padding-bottom: 0.35rem; display: inline-block; }
+    h2 { font-size: 1.4rem !important; margin-top: 2.2rem !important; }
+    h3 { font-size: 1.1rem !important; margin-top: 1.4rem !important; }
+
+    /* ---- Metric widgets -> small cards instead of bare numbers ---- */
+    [data-testid="stMetric"] {
+        background: #ffffff;
+        border: 1px solid var(--line);
+        border-radius: var(--card-radius);
+        padding: 0.9rem 1rem 0.7rem 1rem;
+        box-shadow: 0 1px 3px rgba(16, 24, 40, 0.04);
+    }
+    [data-testid="stMetricLabel"] {
+        color: var(--muted) !important;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        font-size: 0.72rem !important;
+    }
+
+    /* ---- Tabs: teal underline instead of the default red ---- */
+    button[data-baseweb="tab"] { font-weight: 600; }
+    button[data-baseweb="tab"][aria-selected="true"] { color: var(--accent-dark) !important; }
+    [data-baseweb="tab-highlight"] { background-color: var(--accent) !important; }
+    [data-baseweb="tab-border"] { background-color: var(--line) !important; }
+
+    /* ---- Expanders and bordered containers: shared card radius ---- */
+    [data-testid="stExpander"] {
+        border-radius: var(--card-radius);
+        border: 1px solid var(--line);
+    }
+    div[data-testid="stVerticalBlockBorderWrapper"] > div { border-radius: var(--card-radius); }
+
+    /* ---- Alerts: a left accent stripe instead of a flat default box,
+       colored per severity so warning/success/error stay legible ---- */
+    [data-testid="stAlert"] {
+        border-radius: 10px;
+        border: 1px solid var(--line);
+        border-left-width: 5px;
+        border-left-style: solid;
+    }
+    [data-testid="stAlert"]:has([data-testid="stAlertContentWarning"]) { border-left-color: #d97706; }
+    [data-testid="stAlert"]:has([data-testid="stAlertContentInfo"]) { border-left-color: var(--accent); }
+    [data-testid="stAlert"]:has([data-testid="stAlertContentSuccess"]) { border-left-color: #16a34a; }
+    [data-testid="stAlert"]:has([data-testid="stAlertContentError"]) { border-left-color: var(--pulse); }
+
+    /* ---- Progress bar in the accent color ---- */
+    [data-testid="stProgress"] > div > div > div { background-color: var(--accent) !important; }
+
+    /* ---- Buttons in the accent color, not Streamlit's default red ---- */
+    button[kind="primary"], button[kind="formSubmit"] {
+        background-color: var(--accent) !important;
+        border-color: var(--accent) !important;
+        border-radius: 10px !important;
+    }
+    button[kind="primary"]:hover, button[kind="formSubmit"]:hover {
+        background-color: var(--accent-dark) !important;
+        border-color: var(--accent-dark) !important;
+    }
+
+    /* ---- Section breathing room ---- */
+    [data-testid="stVerticalBlock"] > [data-testid="stElementContainer"] { margin-bottom: 0.15rem; }
+    </style>
+    """
+)
+
+PULSE_DIVIDER_SVG = """
+<svg width="220" height="20" viewBox="0 0 220 20" xmlns="http://www.w3.org/2000/svg" style="margin: 2px 0 10px 0;">
+  <polyline points="0,10 55,10 65,2 75,18 85,10 95,10 102,4 109,16 116,10 220,10"
+    fill="none" stroke="#0f766e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
+"""
 
 DEFAULT_DATA_PATH = "heart_disease.csv"
 MODEL_CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".model_cache")
@@ -54,6 +225,43 @@ def load_or_train(cache_name, compute_fn, X, y):
     data = compute_fn(X, y)
     joblib.dump(data, path)
     return data
+
+
+def load_or_compute(cache_name, compute_fn):
+    """Disk-cache any picklable result (DataFrame, dict, ...) under a fixed
+    name so it survives Streamlit restarts, not just the current session.
+    Used for the heavier one-off checks (robustness sweep, ANOVA feature
+    selection, PCA) that don't need the feature-signature invalidation that
+    load_or_train uses for the four main models."""
+    path = os.path.join(MODEL_CACHE_DIR, f"{cache_name}_{FEATURE_CACHE_TAG}.joblib")
+    if os.path.exists(path):
+        return joblib.load(path)
+    result = compute_fn()
+    joblib.dump(result, path)
+    return result
+
+
+def with_spinner(label, func, *args, **kwargs):
+    """Show a spinner with a specific label while a (possibly cached)
+    function runs, so the person always sees what's currently happening
+    instead of a frozen page."""
+    with st.spinner(label):
+        return func(*args, **kwargs)
+
+
+def pick_recommended_model(df):
+    """Mirrors the report's Section 6.1 reasoning, not a bare ROC-AUC argmax:
+    Basic KNN has the nominally highest test-set ROC-AUC, but the margin over
+    Random Forest is within noise. The report selects Random Forest as the
+    more defensible choice instead — more robust to the class imbalance
+    (balanced class weighting), more interpretable (permutation importance),
+    and more consistent across the Section 5.6 robustness checks. Returns
+    (recommended_row, nominal_auc_leader_row); falls back to the ROC-AUC
+    leader if Random Forest isn't present in the given table."""
+    auc_leader_row = df.loc[df["ROC-AUC"].idxmax()]
+    rf_rows = df[df["Model"] == "Random Forest"]
+    recommended_row = rf_rows.iloc[0] if not rf_rows.empty else auc_leader_row
+    return recommended_row, auc_leader_row
 
 
 @st.cache_data(show_spinner="Loading & preprocessing data...")
@@ -164,12 +372,16 @@ def train_rf_smote(X, y, _cache_tag=FEATURE_CACHE_TAG):
     return load_or_train("rf_smote", _compute, X, y)
 
 def run_training_jobs(label, jobs):
+    """Train each job with a single tidy progress bar instead of a long
+    scrolling checklist — shows what's running right now without spamming
+    16 lines of history once everything's done."""
     outputs = {}
-    with st.status(label, expanded=True) as status:
-        for name, (func, X, y) in jobs.items():
-            outputs[name] = func(X, y)
-            status.write(f"✅ {name} ready")
-        status.update(label=f"{label} — done", state="complete")
+    total = len(jobs)
+    progress = st.progress(0.0, text=f"{label}...")
+    for i, (name, (func, X, y)) in enumerate(jobs.items(), start=1):
+        progress.progress((i - 1) / total, text=f"{label} — training {name} ({i}/{total})...")
+        outputs[name] = func(X, y)
+    progress.progress(1.0, text=f"{label} — done ✅")
     return outputs
 
 
@@ -214,6 +426,10 @@ def _add_interaction_terms(X):
 
 @st.cache_resource(show_spinner=False)
 def run_robustness_checks(X, y):
+    return load_or_compute("robustness_checks", lambda: _compute_robustness_checks(X, y))
+
+
+def _compute_robustness_checks(X, y):
     from sklearn.model_selection import train_test_split
     X_eng = _add_interaction_terms(X)
 
@@ -226,41 +442,46 @@ def run_robustness_checks(X, y):
     rf_grid_free_weight = {"rf__n_estimators": [100, 300], "rf__min_samples_leaf": [5, 10], "rf__class_weight": [None, "balanced"]}
 
     rows = []
-    with st.status("Running robustness checks", expanded=True) as status:
-        for scoring in ["f1", "accuracy", "roc_auc", "recall"]:
-            row, _, _ = _eval_pipeline("KNN", f"scoring={scoring}", Pipeline([("scaler", StandardScaler()), ("knn", KNeighborsClassifier(n_neighbors=5))]), {}, scoring, X_train, X_test, y_train, y_test)
-            rows.append(row)
-            row, _, _ = _eval_pipeline("Logistic Regression", f"scoring={scoring}", Pipeline([("scaler", StandardScaler()), ("logreg", LogisticRegression(max_iter=5000, random_state=dp.RANDOM_STATE))]), {}, scoring, X_train, X_test, y_train, y_test)
-            rows.append(row)
-            row, _, _ = _eval_pipeline("Decision Tree", f"scoring={scoring}", Pipeline([("dt", DecisionTreeClassifier(random_state=dp.RANDOM_STATE))]), dt_grid_current, scoring, X_train, X_test, y_train, y_test)
-            rows.append(row)
-            row, _, _ = _eval_pipeline("Random Forest", f"scoring={scoring}", Pipeline([("rf", RandomForestClassifier(random_state=dp.RANDOM_STATE))]), rf_grid_current, scoring, X_train, X_test, y_train, y_test)
-            rows.append(row)
-            status.write(f"✅ scoring={scoring} done")
+    stages = ["scoring=f1", "scoring=accuracy", "scoring=roc_auc", "scoring=recall",
+              "threshold tuning", "widened grids", "interaction features"]
+    total_stages = len(stages)
+    progress = st.progress(0.0, text="Running robustness checks...")
 
-        row, dt_model, dt_prob = _eval_pipeline("Decision Tree", "f1 (baseline)", Pipeline([("dt", DecisionTreeClassifier(random_state=dp.RANDOM_STATE))]), dt_grid_current, "f1", X_train, X_test, y_train, y_test)
-        tuned_t = _best_threshold_from_cv(dt_model, X_train, y_train)
-        y_pred_t = (dt_prob >= tuned_t).astype(int)
-        rows.append({
-            "Check": "Decision Tree", "Scoring": f"f1 + threshold tuned (t={tuned_t:.3f})",
-            "Accuracy": round(accuracy_score(y_test, y_pred_t), 4), "Precision": round(precision_score(y_test, y_pred_t, zero_division=0), 4),
-            "Recall": round(recall_score(y_test, y_pred_t, zero_division=0), 4), "F1-Score": round(f1_score(y_test, y_pred_t, zero_division=0), 4),
-            "ROC-AUC": round(roc_auc_score(y_test, dt_prob), 4),
-        })
-        status.write("✅ threshold tuning done")
+    for stage_i, scoring in enumerate(["f1", "accuracy", "roc_auc", "recall"]):
+        progress.progress(stage_i / total_stages, text=f"Robustness checks — re-tuning all 4 models with {stages[stage_i]}...")
+        row, _, _ = _eval_pipeline("KNN", f"scoring={scoring}", Pipeline([("scaler", StandardScaler()), ("knn", KNeighborsClassifier(n_neighbors=5))]), {}, scoring, X_train, X_test, y_train, y_test)
+        rows.append(row)
+        row, _, _ = _eval_pipeline("Logistic Regression", f"scoring={scoring}", Pipeline([("scaler", StandardScaler()), ("logreg", LogisticRegression(max_iter=5000, random_state=dp.RANDOM_STATE))]), {}, scoring, X_train, X_test, y_train, y_test)
+        rows.append(row)
+        row, _, _ = _eval_pipeline("Decision Tree", f"scoring={scoring}", Pipeline([("dt", DecisionTreeClassifier(random_state=dp.RANDOM_STATE))]), dt_grid_current, scoring, X_train, X_test, y_train, y_test)
+        rows.append(row)
+        row, _, _ = _eval_pipeline("Random Forest", f"scoring={scoring}", Pipeline([("rf", RandomForestClassifier(random_state=dp.RANDOM_STATE))]), rf_grid_current, scoring, X_train, X_test, y_train, y_test)
+        rows.append(row)
 
-        row, _, _ = _eval_pipeline("Decision Tree", "widened grid (class_weight incl.)", Pipeline([("dt", DecisionTreeClassifier(random_state=dp.RANDOM_STATE))]), dt_grid_widened, "f1", X_train, X_test, y_train, y_test)
-        rows.append(row)
-        row, _, _ = _eval_pipeline("Random Forest", "class_weight=None allowed", Pipeline([("rf", RandomForestClassifier(random_state=dp.RANDOM_STATE))]), rf_grid_free_weight, "f1", X_train, X_test, y_train, y_test)
-        rows.append(row)
-        status.write("✅ widened grids done")
+    progress.progress(4 / total_stages, text="Robustness checks — tuning the decision threshold from cross-validated predictions...")
+    row, dt_model, dt_prob = _eval_pipeline("Decision Tree", "f1 (baseline)", Pipeline([("dt", DecisionTreeClassifier(random_state=dp.RANDOM_STATE))]), dt_grid_current, "f1", X_train, X_test, y_train, y_test)
+    tuned_t = _best_threshold_from_cv(dt_model, X_train, y_train)
+    y_pred_t = (dt_prob >= tuned_t).astype(int)
+    rows.append({
+        "Check": "Decision Tree", "Scoring": f"f1 + threshold tuned (t={tuned_t:.3f})",
+        "Accuracy": round(accuracy_score(y_test, y_pred_t), 4), "Precision": round(precision_score(y_test, y_pred_t, zero_division=0), 4),
+        "Recall": round(recall_score(y_test, y_pred_t, zero_division=0), 4), "F1-Score": round(f1_score(y_test, y_pred_t, zero_division=0), 4),
+        "ROC-AUC": round(roc_auc_score(y_test, dt_prob), 4),
+    })
 
-        row, _, _ = _eval_pipeline("Decision Tree", "+ interaction features", Pipeline([("dt", DecisionTreeClassifier(random_state=dp.RANDOM_STATE))]), dt_grid_current, "f1", X_train_eng, X_test_eng, y_train_eng, y_test_eng)
-        rows.append(row)
-        row, _, _ = _eval_pipeline("Random Forest", "+ interaction features", Pipeline([("rf", RandomForestClassifier(random_state=dp.RANDOM_STATE))]), rf_grid_current, "f1", X_train_eng, X_test_eng, y_train_eng, y_test_eng)
-        rows.append(row)
-        status.write("✅ feature engineering done")
-        status.update(label="Robustness checks — done", state="complete")
+    progress.progress(5 / total_stages, text="Robustness checks — re-tuning with widened hyperparameter grids...")
+    row, _, _ = _eval_pipeline("Decision Tree", "widened grid (class_weight incl.)", Pipeline([("dt", DecisionTreeClassifier(random_state=dp.RANDOM_STATE))]), dt_grid_widened, "f1", X_train, X_test, y_train, y_test)
+    rows.append(row)
+    row, _, _ = _eval_pipeline("Random Forest", "class_weight=None allowed", Pipeline([("rf", RandomForestClassifier(random_state=dp.RANDOM_STATE))]), rf_grid_free_weight, "f1", X_train, X_test, y_train, y_test)
+    rows.append(row)
+
+    progress.progress(6 / total_stages, text="Robustness checks — re-tuning with engineered interaction features...")
+    row, _, _ = _eval_pipeline("Decision Tree", "+ interaction features", Pipeline([("dt", DecisionTreeClassifier(random_state=dp.RANDOM_STATE))]), dt_grid_current, "f1", X_train_eng, X_test_eng, y_train_eng, y_test_eng)
+    rows.append(row)
+    row, _, _ = _eval_pipeline("Random Forest", "+ interaction features", Pipeline([("rf", RandomForestClassifier(random_state=dp.RANDOM_STATE))]), rf_grid_current, "f1", X_train_eng, X_test_eng, y_train_eng, y_test_eng)
+    rows.append(row)
+
+    progress.progress(1.0, text="Robustness checks — done ✅")
 
     return pd.DataFrame(rows)
 
@@ -276,6 +497,24 @@ def plot_robustness_roc_auc(df):
     ax.legend(loc="lower right")
     plt.tight_layout()
     return fig
+
+
+@st.cache_resource(show_spinner=False)
+def get_feature_selection_result(X, y):
+    """ANOVA top-10 feature selection robustness check (report Section 5.6.5)."""
+    return load_or_compute(
+        "feature_selection_anova",
+        lambda: fscm.run_feature_selection_check(data={"X": X, "y": y}, save_outputs=False),
+    )
+
+
+@st.cache_resource(show_spinner=False)
+def get_pca_result(X, y):
+    """PCA dimensionality-reduction robustness check (report Section 5.6.6)."""
+    return load_or_compute(
+        "pca_robustness",
+        lambda: pcam.run_pca_check(data={"X": X, "y": y}, save_outputs=False),
+    )
 
 
 def train_all_models(X, y):
@@ -304,65 +543,93 @@ def pick_best(basic_result, smote_result):
 
 with st.sidebar:
 
-    st.markdown(
-        """
-        <style>
-        /* Hide the radio button circles */
-        div[role="radiogroup"] label > div:first-child {
-            display: none !important;
-        }
-        /* Make the sidebar buttons wide, tall, and easy to click */
-        div[role="radiogroup"] label {
-            display: flex;
-            align-items: center;
-            width: 100%;
-            padding: 12px 16px;
-            margin-bottom: 8px;
-            border-radius: 8px;
-            background-color: rgba(0, 0, 0, 0.03);
-            transition: all 0.2s ease-in-out;
-            cursor: pointer;
-            font-weight: 500;
-        }
-        /* Hover effect */
-        div[role="radiogroup"] label:hover {
-            background-color: rgba(196, 78, 82, 0.1) !important;
-            color: #c44e52 !important;
-        }
-        </style>
-        """,
-        unsafe_allow_html=True
-    )
-
-
-    st.markdown("<h2 style='text-align: center; color: #c44e52;'>❤️ Heart Disease Prediction</h2>", unsafe_allow_html=True)
+    st.markdown("<h2 style='text-align: center;'>❤️ Heart Disease Risk</h2>", unsafe_allow_html=True)
     st.divider()
-    st.markdown("### 🧭 Main Menu")
+    st.markdown("#### 👤 For Everyone")
 
-    main_page = st.radio(
+    MAIN_PAGES = ["🏠 Home (Predict & Overview)", "📊 Model Comparison"]
+    MORE_PAGES = [
+        "🔍 EDA",
+        "🧹 Preprocessing",
+        "⚖️ Basic vs SMOTE",
+        "🔬 Robustness & Feature Selection",
+    ]
+
+    # Bug fix: two separate st.radio widgets each keep their own selection in
+    # session_state across reruns. Without this, clicking a Main Menu option
+    # never "wins" once something was picked in More — the More radio still
+    # remembers its last choice and silently overrides it every rerun. A
+    # single tracked value plus on_change callbacks that clear the *other*
+    # widget's state fixes that: whichever one you touch last is the page.
+    if "current_page" not in st.session_state:
+        st.session_state.current_page = MAIN_PAGES[0]
+
+    def _on_main_pick():
+        st.session_state.current_page = st.session_state.main_page_radio
+        st.session_state.more_page_radio = None
+
+    def _on_more_pick():
+        if st.session_state.more_page_radio:
+            st.session_state.current_page = st.session_state.more_page_radio
+
+    main_index = MAIN_PAGES.index(st.session_state.current_page) if st.session_state.current_page in MAIN_PAGES else None
+    st.radio(
         "Navigate",
-        [
-            "🏠 Home (Predict & Overview)",
-            "📊 Model Comparison",
-        ],
-        label_visibility="collapsed"
+        MAIN_PAGES,
+        index=main_index,
+        key="main_page_radio",
+        on_change=_on_main_pick,
+        label_visibility="collapsed",
     )
 
     st.divider()
-    with st.expander("🔧 More"):
-        extra_page = st.radio(
+    st.markdown("#### 🔬 For Reviewers (Technical)")
+    more_active = st.session_state.current_page in MORE_PAGES
+    with st.expander("Full technical breakdown", expanded=more_active):
+        more_index = MORE_PAGES.index(st.session_state.current_page) if more_active else None
+        st.radio(
             "More pages",
-            [
-                "🔍 EDA",
-                "🧹 Preprocessing",
-                "⚖️ Basic vs SMOTE",
-                "🔬 Robustness Checks",
-            ],
-            index=None,
+            MORE_PAGES,
+            index=more_index,
+            key="more_page_radio",
+            on_change=_on_more_pick,
             label_visibility="collapsed",
         )
 
-    page = extra_page if extra_page else main_page
+    page = st.session_state.current_page
+
+# Scroll back to the top of the content area on an actual page switch, not
+# on every rerun (a form submit or dropdown change reruns the script too,
+# and we don't want to yank the user's scroll position away from a result
+# they just generated — only a genuine navigation change should do that).
+if st.session_state.get("_last_rendered_page") != page:
+    st.session_state["_last_rendered_page"] = page
+    components.html(
+        """
+        <script>
+        (function () {
+            function scrollAppToTop() {
+                try {
+                    window.parent.scrollTo(0, 0);
+                    var selectors = [
+                        '[data-testid="stAppViewContainer"]',
+                        '[data-testid="stMain"]',
+                        'section.main',
+                        '.main'
+                    ];
+                    selectors.forEach(function (sel) {
+                        var el = window.parent.document.querySelector(sel);
+                        if (el) { el.scrollTop = 0; }
+                    });
+                } catch (e) {}
+            }
+            scrollAppToTop();
+            setTimeout(scrollAppToTop, 60);
+        })();
+        </script>
+        """,
+        height=0,
+    )
 
 
 try:
@@ -381,7 +648,7 @@ le_target = pipeline_data["le_target"]
 missing_treatment_summary = pipeline_data["missing_treatment_summary"]
 target_mapping = dict(zip(le_target.classes_, le_target.transform(le_target.classes_)))
 
-if page in ("🏠 Home (Predict & Overview)", "📊 Model Comparison"):
+if page in ("🏠 Home (Predict & Overview)", "📊 Model Comparison", "🔬 Robustness & Feature Selection"):
     all_trained = train_all_models(X, y)
 
     knn_basic_data = all_trained["KNN"]
@@ -458,8 +725,7 @@ def prefetch_stats(df, num_cols, cat_cols, X_df, y_ser):
 
 if page == "🏠 Home (Predict & Overview)":
     st.title("❤️ Heart Disease Risk Dashboard")
-    st.markdown("Use the calculator below to assess patient risk, or scroll down to view the dataset overview.")
-
+    st.html(PULSE_DIVIDER_SVG)
 
     st.header("🩺 Live Risk Predictor")
 
@@ -544,40 +810,47 @@ if page == "🏠 Home (Predict & Overview)":
 
         st.caption(f"Powered by {model_choice} ({best_pipeline_used[model_choice]} pipeline)")
 
-
     st.divider()
-    st.header("📊 Dataset Overview")
+    st.subheader("🧭 Explore Further")
+    explore_col1, explore_col2 = st.columns(2)
+    with explore_col1:
+        with st.container(border=True):
+            st.markdown("**🔍 See the Dataset**")
+            st.caption(
+                "10,000 patient records, class balance, missing-value patterns, correlations, "
+                "and sample rows — the full exploratory analysis behind this predictor."
+            )
+            st.markdown("Open **🔍 EDA** from the sidebar under *For Reviewers (Technical)*.")
+    with explore_col2:
+        with st.container(border=True):
+            st.markdown("**📊 See the Models**")
+            st.caption(
+                "Full metrics for all 4 algorithms, and why Random Forest is the report's "
+                "recommended pick even though KNN scores a marginally higher ROC-AUC."
+            )
+            st.markdown("Open **📊 Model Comparison** from the sidebar under *For Everyone*.")
 
 
+elif page == "🔍 EDA":
+    st.title("🔍 Exploratory Data Analysis")
+    st.markdown("Explore the underlying patterns in the raw dataset before any cleaning or encoding.")
+
+    st.subheader("📊 Dataset Snapshot")
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Total Patient Records", f"{raw_df.shape[0]:,}")
     c2.metric("Total Attributes", raw_df.shape[1])
     c3.metric("Numeric Features", len(numeric_cols))
     c4.metric("Categorical Features", len(categorical_cols))
 
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    overview_col1, overview_col2 = st.columns([1, 1.5])
-
-    with overview_col1:
+    snap_col1, snap_col2 = st.columns([1, 1.5])
+    with snap_col1:
         st.markdown("**Target Class Balance**")
         st.pyplot(dv.plot_class_distribution(raw_df))
+    with snap_col2:
+        st.markdown("**Sample Patient Records (Raw Data)**")
+        st.dataframe(raw_df.head(15), width="stretch")
 
-    with overview_col2:
-        st.markdown("**Current Top Performing Model**")
-        best_name = all_results_df.loc[all_results_df["ROC-AUC"].idxmax(), "Model"]
-        best_auc = all_results_df["ROC-AUC"].max()
-        st.info(f"🏆 **{best_name}** currently leads with a test ROC-AUC of **{best_auc:.3f}**.")
-
-
-        st.markdown("<br>", unsafe_allow_html=True)
-        with st.expander("📂 View Sample Patient Records (Raw Data)"):
-            st.dataframe(raw_df.head(15), width="stretch")
-
-
-elif page == "🔍 EDA":
-    st.title("🔍 Exploratory Data Analysis")
-    st.markdown("Explore the underlying patterns in the raw dataset before any cleaning or encoding.")
+    st.divider()
 
     eda_figs = prefetch_eda_plots(raw_df, numeric_cols, categorical_cols)
     outlier_df, table_numeric, table_categorical, fig_assoc, mcar_df, fig_mcar, fig_corr, anova_df, chi2_df = prefetch_stats(raw_df, numeric_cols, categorical_cols, X, y)
@@ -626,6 +899,16 @@ elif page == "🔍 EDA":
         st.pyplot(eda_figs["outliers"])
         with st.expander("📂 View Exact Outlier Counts"):
             st.dataframe(outlier_df, width="stretch")
+
+        st.divider()
+        st.subheader("Structural Data Quality")
+        n_dupes, unique_values_df = dv.check_data_quality(raw_df, categorical_cols)
+        if n_dupes == 0:
+            st.success("No duplicate records found across all 10,000 rows.")
+        else:
+            st.warning(f"{n_dupes} duplicate record(s) found.")
+        with st.expander("📂 View unique values per categorical / binary attribute"):
+            st.dataframe(unique_values_df, width="stretch", hide_index=True)
 
 
 elif page == "🧹 Preprocessing":
@@ -693,7 +976,7 @@ elif page == "📊 Model Comparison":
     st.title("📊 Model Comparison")
 
     metrics_view = best_df[["Model", "Pipeline"] + best_metric_cols]
-    top_row = best_df.loc[best_df["ROC-AUC"].idxmax()]
+    recommended_row, auc_leader_row = pick_recommended_model(best_df)
 
     st.subheader("🏆 Evaluation Metrics")
     card_theme = {
@@ -758,13 +1041,15 @@ elif page == "📊 Model Comparison":
                 st.markdown(f"{theme['icon']} :{accent}[**{row['Model']}**]")
                 with st.container(horizontal=True):
                     st.badge(row["Pipeline"], color=theme["badge"])
-                    if row["Model"] == top_row["Model"]:
-                        st.badge("Leader", icon=":material/emoji_events:", color="orange")
-                st.metric("Accuracy", f":{accent}[{row['Accuracy']:.4f}]")
-                st.metric("Precision", f":{accent}[{row['Precision']:.4f}]")
-                st.metric("Recall", f":{accent}[{row['Recall']:.4f}]")
-                st.metric("F1-Score", f":{accent}[{row['F1-Score']:.4f}]")
-                st.metric("ROC-AUC", f":{accent}[**{row['ROC-AUC']:.4f}**]", border=True)
+                    if row["Model"] == recommended_row["Model"]:
+                        st.badge("Recommended", icon=":material/emoji_events:", color="orange")
+                    elif row["Model"] == auc_leader_row["Model"]:
+                        st.badge("Highest ROC-AUC", icon=":material/trending_up:", color="gray")
+                st.metric("Accuracy", f"{row['Accuracy']:.4f}")
+                st.metric("Precision", f"{row['Precision']:.4f}")
+                st.metric("Recall", f"{row['Recall']:.4f}")
+                st.metric("F1-Score", f"{row['F1-Score']:.4f}")
+                st.metric("ROC-AUC", f"{row['ROC-AUC']:.4f}", border=True)
 
     st.dataframe(
         metrics_view.style
@@ -773,9 +1058,18 @@ elif page == "📊 Model Comparison":
         width="stretch",
         hide_index=True,
     )
-    st.success(
-        f"🏆 **{top_row['Model']}** ({top_row['Pipeline']}) currently leads on test ROC-AUC (**{top_row['ROC-AUC']:.4f}**)."
-    )
+    if recommended_row["Model"] != auc_leader_row["Model"]:
+        st.success(
+            f"🏆 **{recommended_row['Model']}** ({recommended_row['Pipeline']}) is the report's recommended model "
+            f"(ROC-AUC **{recommended_row['ROC-AUC']:.4f}**) — chosen over the nominal ROC-AUC leader, "
+            f"**{auc_leader_row['Model']}** (**{auc_leader_row['ROC-AUC']:.4f}**), because that margin is within "
+            "noise while Random Forest is more robust to the class imbalance and more interpretable."
+        )
+    else:
+        st.success(
+            f"🏆 **{recommended_row['Model']}** ({recommended_row['Pipeline']}) is both the nominal ROC-AUC leader "
+            f"and the report's recommended model (**{recommended_row['ROC-AUC']:.4f}**)."
+        )
 
     acc_row = best_df.loc[best_df["Accuracy"].idxmax()]
     rec_row = best_df.loc[best_df["Recall"].idxmax()]
@@ -783,68 +1077,21 @@ elif page == "📊 Model Comparison":
     no_share = float((y == 0).mean())
     max_auc = float(best_df["ROC-AUC"].max())
 
-    st.subheader("📝 Conclusion & explanation")
-    with st.container(border=True):
-        st.markdown("**How to read the scores**")
-        st.markdown(
-            """
-- **Accuracy** — share of all test patients the model labelled correctly. This looks strong when most people do **not** have heart disease.
-- **Precision** — of the patients flagged as **Yes**, how many truly had disease.
-- **Recall** — of the patients who truly had disease, how many the model caught. This is the clinically important miss-rate score.
-- **F1-score** — a single balance of precision and recall.
-- **ROC-AUC** — how well the model ranks disease risk. **0.50 is chance**; 1.00 is perfect. We pick the displayed pipeline (Basic vs SMOTE) by ROC-AUC first, then accuracy.
-            """
-        )
-
-        st.markdown("**What the comparison shows**")
-        if rec_row["Model"] == f1_row["Model"]:
-            catch_line = (
-                f"- **{rec_row['Model']}** has the highest **recall ({rec_row['Recall']:.4f})** "
-                f"and **F1 ({f1_row['F1-Score']:.4f})**. That model flags more **Yes** cases, "
-                "so accuracy drops — it trades extra false alarms for fewer missed patients."
-            )
-        else:
-            catch_line = (
-                f"- **{rec_row['Model']}** has the highest **recall ({rec_row['Recall']:.4f})** "
-                f"and **{f1_row['Model']}** the highest **F1 ({f1_row['F1-Score']:.4f})**. "
-                "Those models flag more **Yes** cases, so accuracy drops — they trade extra false alarms for fewer missed patients."
-            )
-        st.markdown(
-            f"""
-- **{top_row['Model']}** ({top_row['Pipeline']}) is the overall leader because it has the highest **ROC-AUC ({top_row['ROC-AUC']:.4f})**. That is the fairest headline metric here: the dataset is imbalanced (about **{no_share:.0%} No** / **{1 - no_share:.0%} Yes**).
-- **{acc_row['Model']}** has the highest **accuracy ({acc_row['Accuracy']:.4f})**, but its **recall is only {acc_row['Recall']:.4f}**. It mostly predicts **No**, so it misses most true disease cases.
-{catch_line}
-- A dummy rule that always says **No** would already score about **{no_share:.0%} accuracy** with **0 recall**. High accuracy alone does **not** mean a useful heart-disease detector.
-            """
-        )
-
-        if max_auc < 0.55:
-            st.markdown(
-                f"""
-**In conclusion.** {top_row['Model']} is the best of these four on ranking quality, but every ROC-AUC is still near **0.50**. The models are not reliably separating Yes from No on this feature set. Treat live predictions as illustrative, not clinical decisions.
-                """
-            )
-        else:
-            st.markdown(
-                f"""
-**In conclusion.** **{top_row['Model']}** ({top_row['Pipeline']}) is the preferred model: best ROC-AUC (**{top_row['ROC-AUC']:.4f}**) under class imbalance. Still check recall if the goal is to catch disease cases rather than maximise accuracy.
-                """
-            )
-
     st.subheader("🧭 Feature Importance (Top 10)")
     with st.container(border=True):
-        imp_knn = km.get_permutation_importance(best_results["KNN"]["best_model"], X_test, y_test).head(10)
-        coef_lr = lgm.get_coefficients(best_results["Logistic Regression"]["best_model"], X.columns.tolist()).head(10)
-        imp_rf = rfm.get_permutation_importance(best_results["Random Forest"]["best_model"], rf_X_test, rf_y_test).head(10)
-        imp_dt = dtm.get_permutation_importance(best_results["Decision Tree"]["best_model"], dt_X_test, dt_y_test).head(10)
+        with st.spinner("Computing feature importance for all 4 models..."):
+            imp_knn = km.get_permutation_importance(best_results["KNN"]["best_model"], X_test, y_test).head(10)
+            coef_lr = lgm.get_coefficients(best_results["Logistic Regression"]["best_model"], X.columns.tolist()).head(10)
+            imp_rf = rfm.get_permutation_importance(best_results["Random Forest"]["best_model"], rf_X_test, rf_y_test).head(10)
+            imp_dt = dtm.get_permutation_importance(best_results["Decision Tree"]["best_model"], dt_X_test, dt_y_test).head(10)
 
-        feature_summary = pd.DataFrame({
-            "Rank": range(1, 11),
-            "KNN": [f"{r.Feature} ({r.Importance:.3f})" for r in imp_knn.itertuples()],
-            "Logistic Regression": [f"{r.Feature} ({r.Coefficient:+.3f})" for r in coef_lr.itertuples()],
-            "Random Forest": [f"{r.Feature} ({r.Importance:.3f})" for r in imp_rf.itertuples()],
-            "Decision Tree": [f"{r.Feature} ({r.Importance:.3f})" for r in imp_dt.itertuples()],
-        })
+            feature_summary = pd.DataFrame({
+                "Rank": range(1, 11),
+                "KNN": [f"{r.Feature} ({r.Importance:.3f})" for r in imp_knn.itertuples()],
+                "Logistic Regression": [f"{r.Feature} ({r.Coefficient:+.3f})" for r in coef_lr.itertuples()],
+                "Random Forest": [f"{r.Feature} ({r.Importance:.3f})" for r in imp_rf.itertuples()],
+                "Decision Tree": [f"{r.Feature} ({r.Importance:.3f})" for r in imp_dt.itertuples()],
+            })
         st.dataframe(feature_summary, width="stretch", hide_index=True)
 
 
@@ -1319,21 +1566,104 @@ elif page == "⚖️ Basic vs SMOTE":
                     hide_index=True,
                 )
 
+        st.divider()
+        st.subheader("🌳 Tree Structure (Basic Decision Tree)")
+        with st.expander("Show the fitted tree (first 4 of 8 levels)", expanded=False):
+            st.caption(
+                "The full tree is 8 levels / 215 nodes and too wide to read as one figure, "
+                "so only the top 4 levels are drawn here — matching Figure 5.9 in the report."
+            )
+            st.pyplot(dtm.plot_fitted_tree(dt_res_basic["best_model"], dt_X_test.columns))
 
-elif page == "🔬 Robustness Checks":
-    st.title("🔬 Robustness Checks")
 
-    robustness_df = run_robustness_checks(X, y)
-
-    st.subheader("📈 ROC-AUC Across All Checks")
-    st.pyplot(plot_robustness_roc_auc(robustness_df))
-
-    st.divider()
-
-    st.subheader("📋 Full Results")
-    metric_cols = ["Accuracy", "Precision", "Recall", "F1-Score", "ROC-AUC"]
-    st.dataframe(
-        robustness_df.style.format({c: "{:.4f}" for c in metric_cols}),
-        width="stretch",
-        hide_index=True,
+elif page == "🔬 Robustness & Feature Selection":
+    st.title("🔬 Robustness & Feature Selection")
+    st.markdown(
+        "Section 5.6 of the report: checks whether the near-chance ROC-AUC (≈0.49–0.52) "
+        "seen in every model is a tuning artefact, or a real limit of the data."
     )
+
+    rob_tab1, rob_tab2, rob_tab3 = st.tabs([
+        "⚙️ Scoring, Threshold & Grid Checks",
+        "🎯 Feature Selection (ANOVA Top-10)",
+        "🧬 Dimensionality Reduction (PCA)",
+    ])
+
+    with rob_tab1:
+        robustness_df = run_robustness_checks(X, y)
+
+        st.subheader("📈 ROC-AUC Across All Checks")
+        st.pyplot(plot_robustness_roc_auc(robustness_df))
+
+        st.divider()
+
+        st.subheader("📋 Full Results")
+        metric_cols = ["Accuracy", "Precision", "Recall", "F1-Score", "ROC-AUC"]
+        st.dataframe(
+            robustness_df.style.format({c: "{:.4f}" for c in metric_cols}),
+            width="stretch",
+            hide_index=True,
+        )
+
+    with rob_tab2:
+        st.subheader("Random Forest retrained on the top 10 ANOVA-ranked features")
+        st.caption("Report Section 5.6.5 / Table 5.5 — does trimming to the strongest-scoring predictors change anything?")
+        fs_result = with_spinner("Retraining Random Forest on the top 10 ANOVA features...", get_feature_selection_result, X, y)
+
+        fs_m1, fs_m2, fs_m3, fs_m4, fs_m5 = st.columns(5)
+        fs_m1.metric("Accuracy", f"{fs_result['metrics']['Accuracy']:.4f}")
+        fs_m2.metric("Precision", f"{fs_result['metrics']['Precision']:.4f}")
+        fs_m3.metric("Recall", f"{fs_result['metrics']['Recall']:.4f}")
+        fs_m4.metric("F1-Score", f"{fs_result['metrics']['F1-Score']:.4f}")
+        full_rf_auc = all_results["Random Forest"]["metrics"]["ROC-AUC"]
+        fs_m5.metric(
+            "ROC-AUC", f"{fs_result['metrics']['ROC-AUC']:.4f}",
+            f"{fs_result['metrics']['ROC-AUC'] - full_rf_auc:+.4f} vs full-feature RF",
+        )
+
+        fs_col1, fs_col2 = st.columns([1.3, 1])
+        with fs_col1:
+            st.pyplot(fs_result["fig_anova_scores"])
+        with fs_col2:
+            st.markdown("**Top 10 features by ANOVA F-score**")
+            st.dataframe(fs_result["anova_results"].head(10), width="stretch", hide_index=True)
+
+        fs_col3, fs_col4 = st.columns(2)
+        with fs_col3:
+            st.pyplot(fs_result["fig_confusion_matrix"])
+        with fs_col4:
+            st.pyplot(fs_result["fig_roc_curve"])
+
+        st.info(
+            f"ROC-AUC stays at **{fs_result['metrics']['ROC-AUC']:.4f}**, essentially unchanged from the "
+            f"full-feature Random Forest (**{full_rf_auc:.4f}**). Trimming to the 10 strongest-scoring "
+            "predictors neither helps nor hurts — the signal simply isn't there to find."
+        )
+
+    with rob_tab3:
+        st.subheader("Random Forest retrained on PCA-reduced features")
+        st.caption("Report Section 5.6.6 / Figure 5.18 — is redundancy between features hiding the signal?")
+        pca_result = with_spinner("Fitting PCA and retraining Random Forest on the reduced features...", get_pca_result, X, y)
+
+        pca_m1, pca_m2, pca_m3 = st.columns(3)
+        pca_m1.metric("Original features", pca_result["metrics"]["Original Features"])
+        pca_m2.metric("Components for 95% variance", pca_result["metrics"]["PCA Components"])
+        pca_m3.metric(
+            "ROC-AUC", f"{pca_result['metrics']['ROC-AUC']:.4f}",
+            f"{pca_result['metrics']['ROC-AUC'] - full_rf_auc:+.4f} vs full-feature RF",
+        )
+
+        st.pyplot(pca_result["fig_explained_variance"])
+
+        pca_col1, pca_col2 = st.columns(2)
+        with pca_col1:
+            st.pyplot(pca_result["fig_confusion_matrix"])
+        with pca_col2:
+            st.pyplot(pca_result["fig_roc_curve"])
+
+        st.info(
+            f"{pca_result['metrics']['PCA Components']} of {pca_result['metrics']['Original Features']} "
+            "components are needed to keep 95% of the variance — little redundancy to remove. "
+            f"ROC-AUC (**{pca_result['metrics']['ROC-AUC']:.4f}**) stays in the same 0.49–0.52 band as every "
+            "other check, so dimensionality reduction doesn't uncover hidden signal either."
+        )

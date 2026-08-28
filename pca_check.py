@@ -23,8 +23,15 @@ VARIANCE_RETAINED = 0.95
 sns.set_style("whitegrid")
 
 
-def run_pca_check(path="heart_disease.csv", variance_retained=VARIANCE_RETAINED, save_outputs=True):
-    data = run_pipeline(path)
+def run_pca_check(path="heart_disease.csv", variance_retained=VARIANCE_RETAINED, save_outputs=True, data=None):
+    """Run the PCA dimensionality-reduction robustness check (report Section 5.6.6).
+
+    Pass an already-loaded ``data`` dict (as returned by
+    ``data_preprocessing.run_pipeline``) to reuse a pipeline result computed
+    elsewhere instead of re-running preprocessing from the raw CSV.
+    """
+    if data is None:
+        data = run_pipeline(path)
     X, y = data["X"], data["y"]
 
     X_train, X_test, y_train, y_test = train_test_split(
@@ -119,6 +126,9 @@ def run_pca_check(path="heart_disease.csv", variance_retained=VARIANCE_RETAINED,
         "n_components": n_components,
         "pca": pca,
         "best_model": best_model,
+        "fig_explained_variance": fig1,
+        "fig_confusion_matrix": fig2,
+        "fig_roc_curve": fig3,
     }
 
 

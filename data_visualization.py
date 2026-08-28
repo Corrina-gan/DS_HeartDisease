@@ -83,6 +83,23 @@ def plot_correlation_heatmap(df, numeric_cols):
     fig.tight_layout()
     return fig
 
+def check_data_quality(df, categorical_cols):
+    """Structural quality checks (report Section 3.5.1 / Figure 3.10):
+    duplicate records and the unique values each categorical/binary
+    attribute actually takes, to catch inconsistent labels (e.g. "Yes" vs
+    "yes")."""
+    n_duplicates = int(df.duplicated().sum())
+    unique_values = pd.DataFrame([
+        {
+            "Attribute": col,
+            "Unique Values": ", ".join(sorted(str(v) for v in df[col].dropna().unique())),
+            "Category Count": df[col].nunique(dropna=True),
+        }
+        for col in categorical_cols
+    ])
+    return n_duplicates, unique_values
+
+
 def plot_missing_values(df):
     missing = df.isnull().sum()
     missing_pct = (missing / len(df) * 100).round(2)
