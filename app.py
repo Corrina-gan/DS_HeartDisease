@@ -1,5 +1,8 @@
 import hashlib
+import io
 import os
+import textwrap
+from datetime import datetime
 
 import joblib
 import numpy as np
@@ -7,6 +10,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 import pandas as pd
 import matplotlib.pyplot as plt
+from matplotlib.backends.backend_pdf import PdfPages
 from sklearn.model_selection import cross_val_predict, StratifiedKFold
 from sklearn.metrics import (
     accuracy_score, precision_score, recall_score, f1_score,
@@ -28,59 +32,63 @@ import logistic_regression as lgm
 import random_forest as rfm
 import feature_selection_check as fscm
 import pca_check as pcam
+import heart_3d
+import risk_gauge
 
-st.set_page_config(page_title="Heart Disease Risk", layout="wide", page_icon="\u2764\ufe0f")
+st.set_page_config(
+    page_title="Heart Disease Risk",
+    layout="wide",
+    page_icon=":material/favorite:",
+)  # light clinical dashboard
 
 st.html(
     """
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
     :root {
-        --accent: #0f766e;
-        --accent-dark: #0b5b54;
-        --accent-soft: #e6f4f2;
+        --accent: #0a5c56;
+        --accent-dark: #064440;
+        --accent-soft: #d7efec;
         --pulse: #e11d48;
         --ink: #16232b;
         --muted: #64748b;
-        --line: #e2e8f0;
-        --card-radius: 14px;
+        --line: #d5e3e0;
+        --card-radius: 16px;
+        --glass: rgba(255, 255, 255, 0.72);
     }
 
-    /* ---- Typography: one clean face everywhere ---- */
     html, body, [data-testid="stAppViewContainer"], [data-testid="stSidebar"],
     input, textarea, select, button {
         font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
     }
 
-    /* ---- Canvas: soft neutral instead of stark white ---- */
-    [data-testid="stAppViewContainer"] { background: #f8fafa; }
-    [data-testid="stHeader"] { background: rgba(0,0,0,0); }
-    .block-container { padding-top: 1.6rem; max-width: 1200px; }
+    [data-testid="stAppViewContainer"] {
+        background: #f4f8f8;
+    }
+    [data-testid="stAppViewContainer"]::before { content: none; }
+    [data-testid="stHeader"] { background: rgba(244, 248, 248, 0.92); backdrop-filter: blur(12px); }
+    .block-container { padding-top: 1.35rem; max-width: 1480px; perspective: 1400px; }
 
-    /* ---- Masthead: thin signature gradient bar, ties the two accent
-       colors together at the very top of the page ---- */
     [data-testid="stDecoration"] {
-        background: linear-gradient(90deg, var(--accent) 0%, var(--pulse) 100%) !important;
+        background: linear-gradient(90deg, var(--accent) 0%, #14b8a6 100%) !important;
+        height: 4px !important;
     }
 
-    /* ---- Sidebar ---- */
     [data-testid="stSidebar"] {
-        background: #f1f5f4;
+        background: linear-gradient(180deg, #f7fbfa 0%, #eef5f4 100%);
         border-right: 1px solid var(--line);
     }
     [data-testid="stSidebar"] .stRadio label { font-size: 0.95rem; }
     [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p {
         color: var(--muted);
     }
-    /* Bug fix: Streamlit wraps each radio option's label text in its own
-       <p>, and an explicit color on that <p> always wins over an inherited
-       color from the ancestor <label> — so the label-level color rules
-       below never actually reached the visible text. That made every
-       unchecked nav item render in low-contrast muted gray on a near-white
-       row (illegible). Target the <p> itself, at higher specificity than
-       the blanket muted-text rule above. */
+    [data-testid="stSidebar"] h2,
+    [data-testid="stSidebar"] h3,
+    [data-testid="stSidebar"] h4 {
+        color: var(--ink) !important;
+        border-bottom: none !important;
+        display: block !important;
+    }
+    [data-testid="stSidebar"] hr { border-color: var(--line); }
     [data-testid="stSidebar"] div[role="radiogroup"] label [data-testid="stMarkdownContainer"] p {
         color: var(--ink) !important;
         font-weight: 500;
@@ -92,8 +100,6 @@ st.html(
         color: #ffffff !important;
         font-weight: 700;
     }
-    /* Sidebar nav: hide the bare radio circle, style each option as a
-       full-width row/pill so it reads as a menu, not a form field. */
     [data-testid="stSidebar"] div[role="radiogroup"] label > div:first-child {
         display: none !important;
     }
@@ -103,40 +109,69 @@ st.html(
         width: 100%;
         padding: 10px 14px;
         margin-bottom: 6px;
-        border-radius: 10px;
-        background-color: rgba(0, 0, 0, 0.025);
-        transition: background 0.15s ease, color 0.15s ease;
+        border-radius: 12px;
+        background-color: rgba(255, 255, 255, 0.7);
+        border: 1px solid rgba(213, 227, 224, 0.9);
+        transition: background 0.18s ease, box-shadow 0.18s ease;
         cursor: pointer;
         font-weight: 500;
     }
     [data-testid="stSidebar"] div[role="radiogroup"] label:hover {
         background-color: var(--accent-soft) !important;
-        color: var(--accent-dark) !important;
+        box-shadow: 0 6px 16px rgba(15, 118, 110, 0.08);
+    }
+    [data-testid="stSidebar"] [data-testid="stSidebarUserContent"] {
+        display: flex;
+        flex-direction: column;
+        min-height: calc(100vh - 1.5rem);
+    }
+    .st-key-sidebar_footer {
+        margin-top: auto !important;
+        padding-top: 1.1rem !important;
+        border-top: 1px solid var(--line);
+    }
+    .st-key-sidebar_footer [data-testid="stCaptionContainer"] p {
+        color: #475569 !important;
+        font-size: 0.78rem !important;
+        line-height: 1.45 !important;
     }
     [data-testid="stSidebar"] div[role="radiogroup"] label:has(input:checked) {
-        background-color: var(--accent) !important;
+        background: #0a5c56 !important;
         color: #ffffff !important;
         font-weight: 700;
+        border-color: #064440;
+        box-shadow: 0 8px 18px rgba(6, 68, 64, 0.28);
     }
 
-    /* ---- Headings: one consistent accent, with real breathing room
-       between sections instead of Streamlit's default cramped rhythm ---- */
     h1, h2, h3 {
         color: var(--ink) !important;
-        letter-spacing: -0.01em;
+        letter-spacing: -0.02em;
         font-weight: 800 !important;
     }
-    h1 { font-size: 2.3rem !important; border-bottom: 3px solid var(--accent); padding-bottom: 0.35rem; display: inline-block; }
+    h1 {
+        font-size: 2.35rem !important;
+        border-bottom: 3px solid var(--accent);
+        padding-bottom: 0.45rem;
+        display: block;
+        width: 100%;
+        margin-bottom: 1.45rem !important;
+    }
     h2 { font-size: 1.4rem !important; margin-top: 2.2rem !important; }
     h3 { font-size: 1.1rem !important; margin-top: 1.4rem !important; }
 
-    /* ---- Metric widgets -> small cards instead of bare numbers ---- */
     [data-testid="stMetric"] {
-        background: #ffffff;
-        border: 1px solid var(--line);
+        background: var(--glass);
+        border: 1px solid rgba(213, 227, 224, 0.9);
         border-radius: var(--card-radius);
         padding: 0.9rem 1rem 0.7rem 1rem;
-        box-shadow: 0 1px 3px rgba(16, 24, 40, 0.04);
+        box-shadow: 0 10px 30px rgba(16, 24, 40, 0.05);
+        backdrop-filter: blur(10px);
+        transform: translateZ(0);
+        transition: transform 0.22s ease, box-shadow 0.22s ease;
+    }
+    [data-testid="stMetric"]:hover {
+        transform: perspective(900px) rotateX(4deg) translateY(-3px);
+        box-shadow: 0 16px 36px rgba(15, 118, 110, 0.12);
     }
     [data-testid="stMetricLabel"] {
         color: var(--muted) !important;
@@ -146,16 +181,23 @@ st.html(
         font-size: 0.72rem !important;
     }
 
-    /* ---- Tabs: navy + rose, not teal ---- */
     [data-testid="stTab"] { font-weight: 600; }
     [data-testid="stTab"][data-selected] { color: #1e3a4c !important; }
     [data-testid="stTab"][data-selected] .react-aria-SelectionIndicator {
-        background-color: #e11d48 !important;
+        background-color: #0f766e !important;
     }
 
-    /* Equal-width split tabs (model / EDA / robustness category bars) */
+    @media (prefers-reduced-motion: reduce) {
+        [data-testid="stMetric"]:hover,
+        [data-testid="stSidebar"] div[role="radiogroup"] label:hover {
+            transform: none;
+        }
+    }
+
+    /* Equal-width split tabs (model / EDA / preprocessing / robustness category bars) */
     .st-key-eda_category_tabs [role="tablist"],
     .st-key-smote_model_tabs [role="tablist"],
+    .st-key-prep_category_tabs [role="tablist"],
     .st-key-rob_category_tabs [role="tablist"] {
         display: flex !important;
         width: 100%;
@@ -168,6 +210,7 @@ st.html(
     }
     .st-key-eda_category_tabs [data-testid="stTab"],
     .st-key-smote_model_tabs [data-testid="stTab"],
+    .st-key-prep_category_tabs [data-testid="stTab"],
     .st-key-rob_category_tabs [data-testid="stTab"] {
         flex: 1 1 0 !important;
         min-width: 0 !important;
@@ -183,17 +226,21 @@ st.html(
     }
     .st-key-eda_category_tabs [data-testid="stTab"]:last-of-type,
     .st-key-smote_model_tabs [data-testid="stTab"]:last-of-type,
+    .st-key-prep_category_tabs [data-testid="stTab"]:last-of-type,
     .st-key-rob_category_tabs [data-testid="stTab"]:last-of-type {
         border-right: none !important;
     }
     .st-key-eda_category_tabs [data-testid="stTab"] [data-testid="stMarkdownContainer"],
     .st-key-smote_model_tabs [data-testid="stTab"] [data-testid="stMarkdownContainer"],
+    .st-key-prep_category_tabs [data-testid="stTab"] [data-testid="stMarkdownContainer"],
     .st-key-rob_category_tabs [data-testid="stTab"] [data-testid="stMarkdownContainer"],
     .st-key-eda_category_tabs [data-testid="stTab"] [data-testid="stMarkdownContainer"] p,
     .st-key-smote_model_tabs [data-testid="stTab"] [data-testid="stMarkdownContainer"] p,
+    .st-key-prep_category_tabs [data-testid="stTab"] [data-testid="stMarkdownContainer"] p,
     .st-key-rob_category_tabs [data-testid="stTab"] [data-testid="stMarkdownContainer"] p,
     .st-key-eda_category_tabs [data-testid="stTab"] [data-testid="stIconMaterial"],
     .st-key-smote_model_tabs [data-testid="stTab"] [data-testid="stIconMaterial"],
+    .st-key-prep_category_tabs [data-testid="stTab"] [data-testid="stIconMaterial"],
     .st-key-rob_category_tabs [data-testid="stTab"] [data-testid="stIconMaterial"] {
         font-size: inherit !important;
         font-weight: 700 !important;
@@ -203,69 +250,362 @@ st.html(
     }
     .st-key-eda_category_tabs [data-testid="stTab"][data-hovered]:not([data-selected]),
     .st-key-smote_model_tabs [data-testid="stTab"][data-hovered]:not([data-selected]),
+    .st-key-prep_category_tabs [data-testid="stTab"][data-hovered]:not([data-selected]),
     .st-key-rob_category_tabs [data-testid="stTab"][data-hovered]:not([data-selected]) {
         background: #e8edf2 !important;
         color: #1e3a4c !important;
     }
     .st-key-eda_category_tabs [data-testid="stTab"][data-selected],
     .st-key-smote_model_tabs [data-testid="stTab"][data-selected],
+    .st-key-prep_category_tabs [data-testid="stTab"][data-selected],
     .st-key-rob_category_tabs [data-testid="stTab"][data-selected],
     .st-key-eda_category_tabs [data-testid="stTab"][aria-selected="true"],
     .st-key-smote_model_tabs [data-testid="stTab"][aria-selected="true"],
+    .st-key-prep_category_tabs [data-testid="stTab"][aria-selected="true"],
     .st-key-rob_category_tabs [data-testid="stTab"][aria-selected="true"] {
-        background: #1e3a4c !important;
+        background: #0f766e !important;
         color: #ffffff !important;
     }
     .st-key-eda_category_tabs [data-testid="stTab"] .react-aria-SelectionIndicator,
     .st-key-smote_model_tabs [data-testid="stTab"] .react-aria-SelectionIndicator,
+    .st-key-prep_category_tabs [data-testid="stTab"] .react-aria-SelectionIndicator,
     .st-key-rob_category_tabs [data-testid="stTab"] .react-aria-SelectionIndicator {
         display: none !important;
     }
 
-    /* ---- Expanders and bordered containers: shared card radius ---- */
     [data-testid="stExpander"] {
         border-radius: var(--card-radius);
         border: 1px solid var(--line);
+        background: var(--glass);
+        backdrop-filter: blur(10px);
     }
-    div[data-testid="stVerticalBlockBorderWrapper"] > div { border-radius: var(--card-radius); }
+    div[data-testid="stVerticalBlockBorderWrapper"] {
+        transform-style: preserve-3d;
+        transition: transform 0.22s ease, box-shadow 0.22s ease;
+    }
+    div[data-testid="stVerticalBlockBorderWrapper"] > div {
+        border-radius: var(--card-radius);
+        box-shadow: 0 8px 24px rgba(16, 24, 40, 0.05);
+    }
+    div[data-testid="stVerticalBlockBorderWrapper"]:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 18px 40px rgba(15, 118, 110, 0.10);
+    }
+    .st-key-hero_heart {
+        border-radius: 22px;
+        overflow: hidden;
+        box-shadow: 0 12px 32px rgba(22, 35, 43, 0.08);
+    }
 
-    /* ---- Alerts: a left accent stripe instead of a flat default box,
-       colored per severity so warning/success/error stay legible ---- */
     [data-testid="stAlert"] {
-        border-radius: 10px;
+        border-radius: 12px;
         border: 1px solid var(--line);
         border-left-width: 5px;
         border-left-style: solid;
+        backdrop-filter: blur(8px);
     }
     [data-testid="stAlert"]:has([data-testid="stAlertContentWarning"]) { border-left-color: #d97706; }
     [data-testid="stAlert"]:has([data-testid="stAlertContentInfo"]) { border-left-color: var(--accent); }
     [data-testid="stAlert"]:has([data-testid="stAlertContentSuccess"]) { border-left-color: #16a34a; }
     [data-testid="stAlert"]:has([data-testid="stAlertContentError"]) { border-left-color: var(--pulse); }
 
-    /* ---- Progress bar in the accent color ---- */
     [data-testid="stProgress"] > div > div > div { background-color: var(--accent) !important; }
 
-    /* ---- Buttons in the accent color, not Streamlit's default red ---- */
     button[kind="primary"], button[kind="formSubmit"] {
-        background-color: var(--accent) !important;
-        border-color: var(--accent) !important;
-        border-radius: 10px !important;
+        background: #0a5c56 !important;
+        border-color: transparent !important;
+        border-radius: 12px !important;
+        box-shadow: 0 10px 24px rgba(15, 118, 110, 0.28) !important;
+        transform: translateZ(0);
+        transition: transform 0.18s ease, box-shadow 0.18s ease !important;
     }
     button[kind="primary"]:hover, button[kind="formSubmit"]:hover {
-        background-color: var(--accent-dark) !important;
-        border-color: var(--accent-dark) !important;
+        background: #064440 !important;
+        transform: translateY(-1px) scale(1.01);
+        box-shadow: 0 14px 28px rgba(15, 118, 110, 0.34) !important;
     }
 
-    /* ---- Section breathing room ---- */
     [data-testid="stVerticalBlock"] > [data-testid="stElementContainer"] { margin-bottom: 0.15rem; }
+
+    .st-key-quick_overview {
+        margin: 0.15rem 0 0.85rem 0 !important;
+    }
+    .st-key-quick_overview > div > div > [data-testid="stElementContainer"]:first-child [data-testid="stMarkdownContainer"] p {
+        letter-spacing: 0.08em;
+        color: #16232b !important;
+        margin-bottom: 0.35rem !important;
+    }
+    .st-key-quick_overview [data-testid="stHorizontalBlock"] {
+        align-items: stretch !important;
+    }
+    .st-key-quick_overview [data-testid="stColumn"] {
+        display: flex !important;
+        flex-direction: column !important;
+    }
+    .st-key-quick_overview [data-testid="stColumn"] > div,
+    .st-key-qo_patients, .st-key-qo_no, .st-key-qo_yes, .st-key-qo_models {
+        height: 100% !important;
+        flex: 1 1 auto !important;
+    }
+    .st-key-qo_patients, .st-key-qo_no, .st-key-qo_yes, .st-key-qo_models {
+        border-radius: 14px !important;
+        box-shadow: 0 8px 18px rgba(22, 35, 43, 0.07) !important;
+    }
+    .st-key-qo_patients {
+        background: linear-gradient(180deg, #e7f1f8 0%, #ffffff 55%) !important;
+        border: 1px solid #a9c7de !important;
+        border-top: 6px solid #457b9d !important;
+    }
+    .st-key-qo_no {
+        background: linear-gradient(180deg, #e5f6f1 0%, #ffffff 55%) !important;
+        border: 1px solid #9fd6c9 !important;
+        border-top: 6px solid #0f766e !important;
+    }
+    .st-key-qo_yes {
+        background: linear-gradient(180deg, #fde8ea 0%, #ffffff 55%) !important;
+        border: 1px solid #f3b4b8 !important;
+        border-top: 6px solid #e11d48 !important;
+    }
+    .st-key-qo_models {
+        background: linear-gradient(180deg, #fff4d6 0%, #ffffff 55%) !important;
+        border: 1px solid #efd48a !important;
+        border-top: 6px solid #d4a017 !important;
+    }
+    .st-key-quick_overview [data-testid="stMetric"] {
+        text-align: left;
+        background: transparent !important;
+        border: none !important;
+        box-shadow: none !important;
+        padding: 0.2rem 0.1rem 0.05rem !important;
+    }
+    .st-key-quick_overview [data-testid="stMetric"]:hover {
+        transform: none !important;
+        box-shadow: none !important;
+    }
+    .st-key-quick_overview [data-testid="stMetricValue"] {
+        font-size: 1.55rem !important;
+        font-weight: 800 !important;
+        justify-content: flex-start;
+    }
+    .st-key-quick_overview [data-testid="stMetricValue"] p,
+    .st-key-quick_overview [data-testid="stMetricValue"] .stMarkdownColoredText,
+    .st-key-quick_overview [data-testid="stMetricValue"] strong {
+        font-weight: 800 !important;
+    }
+    .st-key-qo_patients [data-testid="stMetricValue"],
+    .st-key-qo_patients [data-testid="stMetricValue"] p,
+    .st-key-qo_patients [data-testid="stMetricValue"] .stMarkdownColoredText {
+        color: #1e4e6b !important;
+    }
+    .st-key-qo_no [data-testid="stMetricValue"],
+    .st-key-qo_no [data-testid="stMetricValue"] p,
+    .st-key-qo_no [data-testid="stMetricValue"] .stMarkdownColoredText {
+        color: #0b5f4b !important;
+    }
+    .st-key-qo_yes [data-testid="stMetricValue"],
+    .st-key-qo_yes [data-testid="stMetricValue"] p,
+    .st-key-qo_yes [data-testid="stMetricValue"] .stMarkdownColoredText {
+        color: #9f1239 !important;
+    }
+    .st-key-qo_models [data-testid="stMetricValue"],
+    .st-key-qo_models [data-testid="stMetricValue"] p,
+    .st-key-qo_models [data-testid="stMetricValue"] .stMarkdownColoredText {
+        color: #8a5a00 !important;
+    }
+    .st-key-quick_overview [data-testid="stMetricLabel"] {
+        justify-content: flex-start;
+        width: 100%;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        font-size: 0.78rem !important;
+        font-weight: 700 !important;
+        color: #64748b !important;
+    }
+    .st-key-live_console {
+        background: #ffffff !important;
+        border: 1px solid #c5d0ce !important;
+        border-radius: 18px !important;
+        padding: 1.15rem 1.4rem 1.3rem !important;
+        margin-top: 0.55rem !important;
+        box-shadow: 0 10px 28px rgba(22, 35, 43, 0.06) !important;
+    }
+    .st-key-live_console label [data-testid="stMarkdownContainer"] p {
+        white-space: normal !important;
+        line-height: 1.3 !important;
+        font-size: 0.92rem !important;
+    }
+    .st-key-live_console h3 {
+        text-align: center;
+        letter-spacing: 0.06em;
+        color: #16232b !important;
+        margin-bottom: 0.15rem !important;
+    }
+    .st-key-live_vitals,
+    .st-key-live_history {
+        background: #f8fbfb !important;
+        border: 1px solid #d5e3e0 !important;
+        border-radius: 14px !important;
+        padding: 0.7rem 0.85rem 0.85rem !important;
+    }
+    .st-key-live_stage {
+        background: linear-gradient(180deg, #f4f8f8 0%, #eef4f3 100%) !important;
+        border: 1px solid #c5d4d1 !important;
+        border-radius: 16px !important;
+        padding: 0.7rem 0.75rem 0.85rem !important;
+        box-shadow: 0 10px 28px rgba(22, 35, 43, 0.06) !important;
+    }
+    .st-key-heart_risk_pct,
+    .st-key-heart_risk_pct_bad {
+        background: #ffffff !important;
+        border: 1px solid #d5e3e0 !important;
+        border-radius: 14px !important;
+        padding: 0.7rem 0.9rem 0.8rem !important;
+        margin-top: 0.35rem !important;
+        box-shadow: 0 6px 16px rgba(22, 35, 43, 0.06) !important;
+    }
+    .st-key-heart_risk_pct [data-testid="stMetricValue"],
+    .st-key-heart_risk_pct_bad [data-testid="stMetricValue"] {
+        font-size: 2rem !important;
+        font-weight: 800 !important;
+        letter-spacing: -0.03em;
+        color: #0a5c56 !important;
+    }
+    .st-key-heart_risk_pct_bad [data-testid="stMetricValue"] { color: #be123c !important; }
+    .st-key-heart_risk_pct [data-testid="stMetricLabel"],
+    .st-key-heart_risk_pct_bad [data-testid="stMetricLabel"] {
+        font-weight: 700 !important;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #475569 !important;
+    }
+    .st-key-assess_ready,
+    .st-key-assess_high,
+    .st-key-assess_low {
+        background: #ffffff !important;
+        border-radius: 0 12px 12px 0 !important;
+        padding: 0.55rem 0.75rem 0.65rem 0.9rem !important;
+        box-shadow: none !important;
+    }
+    .st-key-assess_ready { border-left: 3px solid #94a3b8 !important; border-top: none !important; border-right: none !important; border-bottom: none !important; }
+    .st-key-assess_high { border-left: 3px solid #e11d48 !important; border-top: none !important; border-right: none !important; border-bottom: none !important; }
+    .st-key-assess_low { border-left: 3px solid #0f766e !important; border-top: none !important; border-right: none !important; border-bottom: none !important; }
+    .st-key-explain_panel_ok, .st-key-explain_panel_bad, .st-key-explain_panel_unsure {
+        background: #ffffff !important;
+        border: 1px solid #d5e3e0 !important;
+        border-radius: 18px !important;
+        box-shadow: 0 10px 26px rgba(22, 35, 43, 0.07) !important;
+        padding: 0.35rem 0.25rem 0.2rem !important;
+    }
+    .st-key-explain_panel_ok { border-top: 6px solid #0a5c56 !important; }
+    .st-key-explain_panel_bad { border-top: 6px solid #e11d48 !important; }
+    .st-key-explain_panel_unsure { border-top: 6px solid #d4a017 !important; }
+    .st-key-explain_panel_ok [data-testid="stMarkdownContainer"] p,
+    .st-key-explain_panel_bad [data-testid="stMarkdownContainer"] p,
+    .st-key-explain_panel_unsure [data-testid="stMarkdownContainer"] p {
+        line-height: 1.55 !important;
+    }
+    .st-key-explain_panel_ok [data-testid="stMarkdownContainer"] strong,
+    .st-key-explain_panel_bad [data-testid="stMarkdownContainer"] strong,
+    .st-key-explain_panel_unsure [data-testid="stMarkdownContainer"] strong {
+        letter-spacing: 0.01em;
+    }
+    .st-key-cta_row {
+        margin: 0.55rem 0 0.35rem 0 !important;
+    }
+    .st-key-analyze_heart button {
+        letter-spacing: 0.06em;
+        font-weight: 800 !important;
+        min-height: 3rem !important;
+        font-size: 1.02rem !important;
+    }
+    .st-key-reset_form button {
+        min-height: 3rem !important;
+        font-weight: 700 !important;
+    }
+    .st-key-visit_history {
+        margin-top: 0.65rem !important;
+        border-top: 6px solid #0a5c56 !important;
+    }
+    .st-key-export_assessment_pdf button {
+        min-height: 2.75rem !important;
+        font-weight: 700 !important;
+    }
+    .st-key-explore_further {
+        margin-top: 0.35rem !important;
+    }
+    .st-key-explore_further [data-testid="stHorizontalBlock"] {
+        align-items: stretch !important;
+    }
+    .st-key-explore_further [data-testid="stColumn"] {
+        display: flex !important;
+        flex-direction: column !important;
+    }
+    .st-key-explore_further [data-testid="stColumn"] > div,
+    .st-key-explore_eda, .st-key-explore_models {
+        height: 100% !important;
+        flex: 1 1 auto !important;
+    }
+    .st-key-explore_eda, .st-key-explore_models {
+        border-radius: 16px !important;
+        box-shadow: 0 10px 24px rgba(22, 35, 43, 0.07) !important;
+    }
+    .st-key-explore_eda {
+        background: linear-gradient(180deg, #e5f6f1 0%, #ffffff 48%) !important;
+        border: 1px solid #9fd6c9 !important;
+        border-top: 6px solid #0f766e !important;
+    }
+    .st-key-explore_models {
+        background: linear-gradient(180deg, #e7f1f8 0%, #ffffff 48%) !important;
+        border: 1px solid #a9c7de !important;
+        border-top: 6px solid #457b9d !important;
+    }
+    .st-key-explore_eda h3, .st-key-explore_models h3 {
+        margin: 0.15rem 0 0.35rem 0 !important;
+        font-size: 1.2rem !important;
+        letter-spacing: -0.02em;
+    }
+    .st-key-explore_eda [data-testid="stCaptionContainer"] p,
+    .st-key-explore_models [data-testid="stCaptionContainer"] p {
+        color: #475569 !important;
+        line-height: 1.5 !important;
+        font-size: 0.95rem !important;
+    }
+    .st-key-explore_eda button {
+        background: linear-gradient(135deg, #14b8a6 0%, #0f766e 100%) !important;
+        border-color: transparent !important;
+        color: #ffffff !important;
+        font-weight: 700 !important;
+        border-radius: 12px !important;
+        box-shadow: 0 8px 18px rgba(15, 118, 110, 0.22) !important;
+    }
+    .st-key-explore_models button {
+        background: linear-gradient(135deg, #6ea3c4 0%, #457b9d 100%) !important;
+        border-color: transparent !important;
+        color: #ffffff !important;
+        font-weight: 700 !important;
+        border-radius: 12px !important;
+        box-shadow: 0 8px 18px rgba(69, 123, 157, 0.22) !important;
+    }
     </style>
     """
 )
 
 PULSE_DIVIDER_SVG = """
-<svg width="220" height="20" viewBox="0 0 220 20" xmlns="http://www.w3.org/2000/svg" style="margin: 2px 0 10px 0;">
-  <polyline points="0,10 55,10 65,2 75,18 85,10 95,10 102,4 109,16 116,10 220,10"
-    fill="none" stroke="#0f766e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+<svg width="260" height="22" viewBox="0 0 260 22" xmlns="http://www.w3.org/2000/svg" style="margin: 2px 0 10px 0;">
+  <defs>
+    <linearGradient id="ecgGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#0f766e"/>
+      <stop offset="55%" stop-color="#14b8a6"/>
+      <stop offset="100%" stop-color="#e11d48"/>
+    </linearGradient>
+  </defs>
+  <polyline class="ecg-line" points="0,11 70,11 82,3 94,19 106,11 120,11 128,5 136,17 144,11 260,11"
+    fill="none" stroke="url(#ecgGrad)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+  <style>
+    .ecg-line { stroke-dasharray: 90 420; animation: ecgSweep 2.4s linear infinite; }
+    @keyframes ecgSweep { to { stroke-dashoffset: -510; } }
+    @media (prefers-reduced-motion: reduce) { .ecg-line { animation: none; stroke-dasharray: none; } }
+  </style>
 </svg>
 """
 
@@ -355,6 +695,96 @@ def render_smote_delta_kpis(prefix, row, delta_fn):
                 )
 
 
+def _best_param(metrics, prefix, name):
+    params = metrics.get("Best Params") or {}
+    return params.get(f"{prefix}__{name}", params.get(name))
+
+
+def _hp_display(value, kind="plain"):
+    if value is None or value == "None":
+        return "None"
+    if kind == "penalty":
+        return str(value).upper()
+    if kind == "weight":
+        return str(value).replace("_", " ").title()
+    if kind == "metric":
+        return str(value).replace("_", " ").title()
+    return value
+
+
+def render_basic_vs_smote_eval(model_name, basic_m, smote_m, hyperparams, tune_what):
+    """Final hyperparameter table (Basic vs SMOTE) plus what each test metric means."""
+    setting_names = [label for label, *_ in hyperparams]
+    basic_hp = [_hp_display(_best_param(basic_m, prefix, key), kind) for _, prefix, key, kind in hyperparams]
+    smote_hp = [_hp_display(_best_param(smote_m, prefix, key), kind) for _, prefix, key, kind in hyperparams]
+    metric_names = ["CV F1", "Test Accuracy", "Test Recall", "Test F1", "Test ROC-AUC"]
+    metric_keys = ["CV F1 (best)", "Accuracy", "Recall", "F1-Score", "ROC-AUC"]
+
+    config = pd.DataFrame({
+        "Pipeline": setting_names + metric_names,
+        "Basic": basic_hp + [f"{basic_m[k]:.4f}" for k in metric_keys],
+        "SMOTE": smote_hp + [f"{smote_m[k]:.4f}" for k in metric_keys],
+    })
+
+    kept = "Basic" if basic_m["ROC-AUC"] >= smote_m["ROC-AUC"] else "SMOTE"
+    smote_raised_f1 = smote_m["F1-Score"] > basic_m["F1-Score"] + 1e-6
+    if kept == "Basic" and smote_raised_f1:
+        select_note = (
+            "The **Basic** pipeline was selected for comparison (higher test ROC-AUC). "
+            "SMOTE improved test F1 but not ranking quality."
+        )
+        f1_tail = "SMOTE raised this score, but ROC-AUC did not improve, so **Basic** is kept."
+    elif kept == "Basic":
+        select_note = (
+            "The **Basic** pipeline was selected for comparison. "
+            "Oversampling did not improve the test F1-score."
+        )
+        f1_tail = "SMOTE did not raise this score, so the **Basic** pipeline is kept."
+    else:
+        select_note = "The **SMOTE** pipeline was selected for comparison (higher test ROC-AUC)."
+        f1_tail = "SMOTE improved this score and is kept for comparison."
+
+    st.subheader("⚙️ Final Hyperparameter Configuration")
+    st.caption("Tuned settings and held-out test metrics for the Basic and SMOTE pipelines.")
+
+    with st.container(border=True):
+        st.markdown(f"**Final configuration — {model_name} (Basic vs SMOTE)**")
+        st.dataframe(config, width="stretch", hide_index=True)
+        st.caption(select_note)
+
+    with st.container(border=True):
+        st.markdown("**What these evaluation metrics mean**")
+        st.markdown(
+            f"- **CV F1** (Basic {basic_m['CV F1 (best)']:.4f} | SMOTE {smote_m['CV F1 (best)']:.4f}) — "
+            "mean F1 for the Yes class during 5-fold tuning on the *training* set. "
+            f"GridSearch used this score to pick {tune_what}."
+        )
+        st.markdown(
+            f"- **Test accuracy** (Basic {basic_m['Accuracy']:.4f} | SMOTE {smote_m['Accuracy']:.4f}) — "
+            "share of all test patients labelled correctly. "
+            "Always predicting No already scores about **0.80**, so accuracy alone is a poor headline metric on this 80/20 set."
+        )
+        st.markdown(
+            f"- **Test precision** (Basic {basic_m['Precision']:.4f} | SMOTE {smote_m['Precision']:.4f}) — "
+            "of the patients the model called **Yes**, how many really had heart disease. "
+            f"Basic {basic_m['Precision']:.0%} / SMOTE {smote_m['Precision']:.0%} means most Yes flags are false alarms."
+        )
+        st.markdown(
+            f"- **Test recall** (Basic {basic_m['Recall']:.4f} | SMOTE {smote_m['Recall']:.4f}) — "
+            "of the patients who truly had heart disease, how many the model found. "
+            f"Basic finds **{basic_m['Recall']:.1%}** of real Yes cases; SMOTE finds **{smote_m['Recall']:.1%}**."
+        )
+        st.markdown(
+            f"- **Test F1** (Basic {basic_m['F1-Score']:.4f} | SMOTE {smote_m['F1-Score']:.4f}) — "
+            f"harmonic mean of precision and recall for the Yes class. {f1_tail}"
+        )
+        st.markdown(
+            f"- **Test ROC-AUC** (Basic {basic_m['ROC-AUC']:.4f} | SMOTE {smote_m['ROC-AUC']:.4f}) — "
+            "how well the model *ranks* Yes above No. **0.50** is a coin flip. "
+            "Values near chance mean neither pipeline is a reliable risk ranker."
+        )
+
+
 def _pipeline_input_for_clf(pipeline, row):
     """Apply every transform before the classifier (scaler yes, SMOTE no)."""
     Xt = row
@@ -377,30 +807,7 @@ def _source_field(feature_name, raw_input):
         if matches:
             key = max(matches, key=len)
             return key, raw_input[key]
-    return feature_name.replace("_", " "), None
-
-
-def _used_lines(feature_names, raw_input, effects=None):
-    """Up to 4 plain 'field: value — effect' lines, no encoded dummy names."""
-    lines = []
-    seen = set()
-    effects = effects or {}
-    for name in feature_names:
-        field, value = _source_field(name, raw_input)
-        if field in seen:
-            continue
-        seen.add(field)
-        effect = effects.get(name)
-        if value is None:
-            text = f"**{field}**"
-        else:
-            text = f"**{field}:** {value}"
-        if effect:
-            text += f" — {effect}"
-        lines.append(text)
-        if len(lines) >= 4:
-            break
-    return lines
+    return f"{feature_name.replace('_', ' ')}", None
 
 
 EVIDENCE_FIELDS = [
@@ -515,7 +922,7 @@ def _original_fields(encoded_names, raw_input):
     return fields
 
 
-def explain_live_prediction(model_choice, pipeline, row, pred, prob_disease, metrics, raw_input=None):
+def explain_live_prediction(pipeline, row, pred, prob_disease, raw_input=None):
     """Short, non-technical reason for the live predictor."""
     is_yes = pred == 1
     pct = prob_disease * 100
@@ -841,6 +1248,32 @@ def plot_robustness_roc_auc(df):
     return fig
 
 
+MODEL_ORDER = ["Logistic Regression", "Decision Tree", "Random Forest", "KNN"]
+
+
+def plot_selected_pipelines_roc_auc(basic_results, y_tests):
+    """Figure 6.2 — ROC-AUC of the four Basic pipelines, recomputed from test probabilities."""
+    order = MODEL_ORDER
+    aucs = [roc_auc_score(y_tests[name], basic_results[name]["y_prob"]) for name in order]
+    labels = [f"Basic\n{name}" for name in order]
+
+    fig, ax = plt.subplots(figsize=(8.5, 5))
+    colors = ["#9ecae1", "#6baed6", "#3182bd", "#08519c"]
+    bars = ax.bar(labels, aucs, color=colors, width=0.62, zorder=3)
+    ax.axhline(0.5, color="#c44e52", linestyle="--", linewidth=1.6, label="Chance level (0.500)", zorder=2)
+    ax.bar_label(bars, labels=[f"{v:.4f}" for v in aucs], padding=4, fontsize=10, fontweight="bold")
+    ax.set_ylabel("ROC-AUC")
+    ax.set_ylim(0, 0.6)
+    ax.set_title("ROC-AUC of the 4 Selected (Basic) Pipelines", fontweight="bold")
+    ax.legend(loc="upper right", frameon=True)
+    ax.set_axisbelow(True)
+    ax.yaxis.grid(True, linestyle=":", alpha=0.5)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    plt.tight_layout()
+    return fig
+
+
 @st.cache_resource(show_spinner=False)
 def get_feature_selection_result(X, y):
     """ANOVA top-10 feature selection robustness check (report Section 5.6.5)."""
@@ -885,7 +1318,11 @@ def pick_best(basic_result, smote_result):
 
 with st.sidebar:
 
-    st.markdown("<h2 style='text-align: center;'>❤️ Heart Disease Risk</h2>", unsafe_allow_html=True)
+    st.markdown(
+        "<h2 style='text-align:center;margin-bottom:0.2rem;'>🫀 Heart Disease Risk</h2>",
+        unsafe_allow_html=True,
+    )
+    st.caption("Interactive clinical ML demo")
     st.divider()
     st.markdown("#### 👤 For Everyone")
 
@@ -937,6 +1374,10 @@ with st.sidebar:
             on_change=_on_more_pick,
             label_visibility="collapsed",
         )
+
+    with st.container(key="sidebar_footer"):
+        st.caption("10,000-record public dataset · 4 models")
+        st.caption("Class project — not a medical diagnosis.")
 
     page = st.session_state.current_page
 
@@ -1009,18 +1450,20 @@ if page in ("🏠 Home (Predict & Overview)", "📊 Model Comparison", "🔬 Rob
     rf_X_test, rf_y_test = rf_basic_data["X_test"], rf_basic_data["y_test"]
     rf_smote_data = all_trained["Random Forest (SMOTE)"]
 
-    basic_results = {
+    _basic = {
         "KNN": knn_basic_data["result"],
         "Logistic Regression": lr_basic_data["result"],
         "Random Forest": rf_basic_data["result"],
         "Decision Tree": dt_basic_data["result"],
     }
-    smote_results = {
+    _smote = {
         "KNN": knn_smote_data["result"],
         "Logistic Regression": lr_smote_data["result"],
         "Random Forest": rf_smote_data["result"],
         "Decision Tree": dt_smote_data["result"],
     }
+    basic_results = {name: _basic[name] for name in MODEL_ORDER}
+    smote_results = {name: _smote[name] for name in MODEL_ORDER}
 
     best_results = {}
     best_pipeline_used = {}
@@ -1051,7 +1494,7 @@ def prefetch_eda_plots(df, num_cols, cat_cols):
         "num_by_target": dv.plot_numeric_by_target(df, num_cols),
         "cat_rate": dv.plot_categorical_rate_by_target(df, cat_cols),
         "cat_counts": dv.plot_categorical_counts_by_target(df, cat_cols),
-        "cat_pct": dv.plot_categorical_percentage_by_target(df, cat_cols)
+        "cat_pct": dv.plot_categorical_percentage_by_target(df, cat_cols),
     }
 
 @st.cache_resource(show_spinner="Prefetching Data Stats...")
@@ -1065,102 +1508,582 @@ def prefetch_stats(df, num_cols, cat_cols, X_df, y_ser):
     return outlier_df, table_numeric, table_categorical, fig_assoc, mcar_df, fig_mcar, fig_corr, anova_df, chi2_df
 
 
+FEATURED_NUM = [
+    "Age", "Blood Pressure", "Cholesterol Level", "BMI", "Sleep Hours",
+]
+FEATURED_CAT = [
+    "Gender", "Exercise Habits", "Smoking",
+    "Family Heart Disease", "Diabetes", "High Blood Pressure",
+]
+FIELD_UNITS = {
+    "Age": "years",
+    "Blood Pressure": "mmHg",
+    "Cholesterol Level": "mg/dL",
+    "BMI": "kg/m²",
+    "Sleep Hours": "h",
+    "Triglyceride Level": "mg/dL",
+    "Fasting Blood Sugar": "mg/dL",
+    "CRP Level": "mg/L",
+    "Homocysteine Level": "µmol/L",
+}
+SHORT_LABELS = {
+    "Age": "Age",
+    "Blood Pressure": "Blood Pressure",
+    "Cholesterol Level": "Cholesterol Level",
+    "BMI": "Body Mass Index",
+    "Sleep Hours": "Sleep Hours",
+    "Fasting Blood Sugar": "Fasting Blood Sugar",
+    "CRP Level": "C-Reactive Protein",
+    "Triglyceride Level": "Triglyceride Level",
+    "Homocysteine Level": "Homocysteine Level",
+    "Gender": "Gender",
+    "Exercise Habits": "Exercise Habits",
+    "Smoking": "Smoking",
+    "Family Heart Disease": "Family Heart Disease",
+    "Diabetes": "Diabetes",
+    "High Blood Pressure": "High Blood Pressure",
+    "Low HDL Cholesterol": "Low HDL (High-Density Lipoprotein)",
+    "High LDL Cholesterol": "High LDL (Low-Density Lipoprotein)",
+    "Alcohol Consumption": "Alcohol Consumption",
+    "Stress Level": "Stress Level",
+    "Sugar Consumption": "Sugar Consumption",
+}
+
+
+def _vital_flag(kind, value):
+    """Return (dot, label) for live vitals. kind is bp, chol, or bmi."""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return "⚪", "—"
+    if kind == "bp":
+        if v >= 140:
+            return "🔴", "High"
+        if v >= 130:
+            return "🟠", "Elevated"
+        return "🟢", "Normal"
+    if kind == "chol":
+        if v >= 240:
+            return "🔴", "High"
+        if v >= 200:
+            return "🟠", "Elevated"
+        return "🟢", "Normal"
+    if kind == "bmi":
+        if v >= 30:
+            return "🔴", "High"
+        if v >= 25:
+            return "🟠", "Elevated"
+        return "🟢", "Normal"
+    return "⚪", "—"
+
+
+def _estimated_bpm():
+    """Resting-style BPM from form vitals (there is no heart-rate field)."""
+    age = float(st.session_state.get("pred_num_Age", 49) or 49)
+    bp = float(st.session_state.get("pred_num_Blood Pressure", 120) or 120)
+    sleep = float(st.session_state.get("pred_num_Sleep Hours", 7) or 7)
+    stress = str(st.session_state.get("pred_cat_Stress Level", "Low") or "Low")
+    bpm = 68.0
+    if age >= 60:
+        bpm += 4
+    if bp >= 140:
+        bpm += 10
+    elif bp >= 130:
+        bpm += 5
+    if sleep <= 5:
+        bpm += 10
+    elif sleep <= 6:
+        bpm += 5
+    if stress == "High":
+        bpm += 14
+    elif stress == "Medium":
+        bpm += 6
+    if st.session_state.get("last_risk_label") == "Yes":
+        bpm += 8
+    return int(min(120, max(56, round(bpm))))
+
+
+def _field_label(col):
+    name = SHORT_LABELS.get(col, col)
+    unit = FIELD_UNITS.get(col)
+    return f"{name} ({unit})" if unit else name
+
+
+def _num_widget(col, default):
+    label = _field_label(col)
+    key = f"pred_num_{col}"
+    if key not in st.session_state:
+        st.session_state[key] = float(default)
+    kwargs = {"key": key, "persist_state": "session"}
+    if col in ("BMI", "Sleep Hours", "CRP Level", "Homocysteine Level"):
+        kwargs["format"] = "%.2f"
+        kwargs["step"] = 0.01 if col == "BMI" else 0.1
+    else:
+        kwargs["format"] = "%.0f"
+        kwargs["step"] = 1.0
+    return st.number_input(label, **kwargs)
+
+
+def _cat_widget(col, options):
+    key = f"pred_cat_{col}"
+    if key not in st.session_state and options:
+        st.session_state[key] = options[0]
+    return st.selectbox(
+        SHORT_LABELS.get(col, col),
+        options,
+        key=key,
+        persist_state="session",
+    )
+
+
+CUSTOM_PRESET = "Custom (edit the form)"
+PATIENT_PRESETS = {
+    "Healthy Active Adult": {
+        "num": {
+            "Age": 34, "Blood Pressure": 112, "Cholesterol Level": 168, "BMI": 22.4,
+            "Sleep Hours": 8.0, "Triglyceride Level": 88, "Fasting Blood Sugar": 86,
+            "CRP Level": 0.6, "Homocysteine Level": 7.8,
+        },
+        "cat": {
+            "Gender": "Female", "Exercise Habits": "High", "Smoking": "No",
+            "Family Heart Disease": "No", "Diabetes": "No", "High Blood Pressure": "No",
+            "Low HDL Cholesterol": "No", "High LDL Cholesterol": "No",
+            "Alcohol Consumption": "Low", "Stress Level": "Low", "Sugar Consumption": "Low",
+        },
+    },
+    "High-Risk Diabetic": {
+        "num": {
+            "Age": 80, "Blood Pressure": 200, "Cholesterol Level": 320, "BMI": 42.0,
+            "Sleep Hours": 3.0, "Triglyceride Level": 380, "Fasting Blood Sugar": 198,
+            "CRP Level": 16.5, "Homocysteine Level": 24.0,
+        },
+        "cat": {
+            "Gender": "Male", "Exercise Habits": "Low", "Smoking": "Yes",
+            "Family Heart Disease": "Yes", "Diabetes": "Yes", "High Blood Pressure": "Yes",
+            "Low HDL Cholesterol": "Yes", "High LDL Cholesterol": "Yes",
+            "Alcohol Consumption": "High", "Stress Level": "High", "Sugar Consumption": "High",
+        },
+    },
+    "Adult With Some Risk Factors": {
+        "num": {
+            "Age": 56, "Blood Pressure": 132, "Cholesterol Level": 212, "BMI": 27.1,
+            "Sleep Hours": 6.0, "Triglyceride Level": 178, "Fasting Blood Sugar": 108,
+            "CRP Level": 3.1, "Homocysteine Level": 12.8,
+        },
+        "cat": {
+            "Gender": "Male", "Exercise Habits": "Medium", "Smoking": "No",
+            "Family Heart Disease": "Yes", "Diabetes": "No", "High Blood Pressure": "No",
+            "Low HDL Cholesterol": "No", "High LDL Cholesterol": "Yes",
+            "Alcohol Consumption": "Medium", "Stress Level": "Medium", "Sugar Consumption": "Medium",
+        },
+    },
+}
+
+
+def _form_defaults(raw_df, numeric_cols, categorical_cols):
+    nums = {col: float(raw_df[col].median()) for col in numeric_cols}
+    cats = {}
+    for col in categorical_cols:
+        mode = raw_df[col].dropna().mode()
+        if not mode.empty:
+            cats[col] = mode.iloc[0]
+        elif col in dp.ORDINAL_MAPS:
+            cats[col] = next(iter(dp.ORDINAL_MAPS[col]))
+        else:
+            cats[col] = "No"
+    return nums, cats
+
+
+def _apply_profile(nums, cats):
+    for col, val in nums.items():
+        st.session_state[f"pred_num_{col}"] = float(val)
+    for col, val in cats.items():
+        st.session_state[f"pred_cat_{col}"] = val
+
+
+def _seed_form_defaults(raw_df, numeric_cols, categorical_cols):
+    nums, cats = _form_defaults(raw_df, numeric_cols, categorical_cols)
+    for col, val in nums.items():
+        st.session_state.setdefault(f"pred_num_{col}", float(val))
+    for col, val in cats.items():
+        st.session_state.setdefault(f"pred_cat_{col}", val)
+
+
+def _on_patient_preset():
+    name = st.session_state.get("patient_preset")
+    spec = PATIENT_PRESETS.get(name)
+    if spec:
+        _apply_profile(spec["num"], spec["cat"])
+
+
+def _reset_patient_form(raw_df, numeric_cols, categorical_cols):
+    nums, cats = _form_defaults(raw_df, numeric_cols, categorical_cols)
+    _apply_profile(nums, cats)
+    st.session_state.patient_preset = CUSTOM_PRESET
+    st.session_state.last_risk_pct = None
+    st.session_state.last_risk_label = None
+    st.session_state.live_pred = None
+
+
+def _record_visit(prob_disease, label, model_choice):
+    hist = st.session_state.setdefault("risk_history", [])
+    hist.append({
+        "visit": len(hist) + 1,
+        "when": datetime.now().strftime("%H:%M"),
+        "risk": float(prob_disease) * 100,
+        "label": label,
+        "model": model_choice,
+    })
+
+
+def build_assessment_pdf(live, history):
+    """One-page printable summary. Class-project demo, not a medical record."""
+    raw = live.get("raw_input") or {}
+    reason = live.get("reason") or {}
+    pct = float(live.get("prob_disease") or 0) * 100
+    label = live.get("label") or "—"
+    model = live.get("model_choice") or "—"
+    when = live.get("when") or datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    buf = io.BytesIO()
+    fig = plt.figure(figsize=(8.27, 11.69))
+    fig.patch.set_facecolor("white")
+    ax = fig.add_axes([0, 0, 1, 1])
+    ax.set_axis_off()
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+
+    accent = "#0a5c56" if label != "Yes" else "#be123c"
+    ax.add_patch(plt.Rectangle((0, 0.955), 1, 0.045, color=accent, transform=ax.transAxes, clip_on=False))
+    ax.text(0.06, 0.972, "Heart Disease Risk  ·  Assessment summary", color="white",
+            fontsize=13, fontweight="bold", va="center")
+    ax.text(0.06, 0.925, f"{when}   ·   Model: {model}   ·   Prediction: {label}   ·   {pct:.0f}% risk",
+            fontsize=10, color="#16232b")
+    ax.text(0.06, 0.898, "Class project demo on 10,000 public records — not a medical diagnosis.",
+            fontsize=8.5, color="#64748b")
+
+    bar_x, bar_y, bar_w, bar_h = 0.06, 0.868, 0.72, 0.016
+    n_seg = 40
+    for i in range(n_seg):
+        t = i / max(n_seg - 1, 1)
+        if t < 0.5:
+            u = t / 0.5
+            color = (0.06 + 0.77 * u, 0.46 + 0.32 * u, 0.34 * (1 - u))
+        else:
+            u = (t - 0.5) / 0.5
+            color = (0.83 + 0.05 * u, 0.78 * (1 - u), 0.34 * (1 - u))
+        ax.add_patch(plt.Rectangle((bar_x + bar_w * i / n_seg, bar_y), bar_w / n_seg + 0.0005, bar_h,
+                                   color=color, linewidth=0))
+    marker_x = bar_x + bar_w * min(max(pct / 100.0, 0), 1)
+    ax.plot([marker_x], [bar_y + bar_h + 0.006], marker="v", color="#16232b", markersize=7)
+    ax.text(0.80, 0.874, f"{pct:.0f}%  ·  {label}", fontsize=9, fontweight="bold",
+            color=accent, va="center")
+
+    ax.text(0.06, 0.848, "What this means", fontsize=11, fontweight="bold", color="#16232b")
+    y = 0.824
+    for line in textwrap.wrap(str(reason.get("headline", "")).replace("**", ""), 92):
+        ax.text(0.06, y, line, fontsize=9.5, color="#16232b")
+        y -= 0.018
+    for line in textwrap.wrap(str(reason.get("meaning", "")).replace("**", ""), 92):
+        ax.text(0.06, y, line, fontsize=8.5, color="#475569")
+        y -= 0.016
+
+    y -= 0.012
+    ax.text(0.06, y, "Patient inputs", fontsize=11, fontweight="bold", color="#16232b")
+    y -= 0.01
+    rows = []
+    for col, val in raw.items():
+        unit = FIELD_UNITS.get(col, "")
+        shown = f"{val:g} {unit}".strip() if isinstance(val, (int, float, np.floating)) else str(val)
+        rows.append((SHORT_LABELS.get(col, col), shown))
+    col_x = (0.06, 0.54)
+    row_h = 0.0165
+    for i, (name, shown) in enumerate(rows):
+        xx = col_x[0] if i < (len(rows) + 1) // 2 else col_x[1]
+        yy = y - (i % ((len(rows) + 1) // 2)) * row_h
+        ax.text(xx, yy, f"{name}:  {shown}", fontsize=8, color="#334155", va="top")
+    y -= ((len(rows) + 1) // 2) * row_h + 0.02
+
+    ax.text(0.06, y, "Why the model said that", fontsize=11, fontweight="bold", color="#16232b")
+    y -= 0.018
+    for line in textwrap.wrap(str(reason.get("why", "")).replace("**", ""), 92):
+        ax.text(0.06, y, line, fontsize=8.5, color="#475569")
+        y -= 0.016
+
+    if history:
+        y -= 0.012
+        ax.text(0.06, y, "Visit history (this session)", fontsize=11, fontweight="bold", color="#16232b")
+        y -= 0.008
+        hist_h = 0.14
+        axh = fig.add_axes([0.08, max(0.12, y - hist_h), 0.84, hist_h - 0.01])
+        xs = [h["visit"] for h in history]
+        ys = [h["risk"] for h in history]
+        axh.plot(xs, ys, color=accent, marker="o", linewidth=2)
+        axh.fill_between(xs, ys, color=accent, alpha=0.12)
+        axh.set_ylim(0, 100)
+        axh.set_xlabel("Visit")
+        axh.set_ylabel("% risk")
+        axh.grid(True, linestyle=":", alpha=0.4)
+        y = max(0.12, y - hist_h) - 0.02
+
+    ax.text(0.06, 0.055, str(reason.get("note", "")).replace("**", ""), fontsize=8, color="#64748b")
+    ax.text(0.06, 0.032, "Visual risk: green/teal = lower estimate, crimson = higher estimate.",
+            fontsize=8, color="#64748b")
+
+    with PdfPages(buf) as pdf:
+        pdf.savefig(fig)
+    plt.close(fig)
+    return buf.getvalue()
+
+
 if page == "🏠 Home (Predict & Overview)":
-    st.title("❤️ Heart Disease Risk Dashboard")
-    st.html(PULSE_DIVIDER_SVG)
+    st.session_state.setdefault("risk_history", [])
+    st.session_state.setdefault("patient_preset", CUSTOM_PRESET)
+    if st.session_state.get("patient_preset") in (
+        "Borderline Vitals",
+        "Elevated Labs, Family History",
+    ):
+        st.session_state.patient_preset = "Adult With Some Risk Factors"
+    _seed_form_defaults(raw_df, numeric_cols, categorical_cols)
+    last_risk = st.session_state.get("last_risk_pct")
+    last_label = st.session_state.get("last_risk_label")
+    live = st.session_state.get("live_pred")
 
-    st.header("🩺 Live Risk Predictor")
+    st.title("Heart Disease Risk")
+    st.caption(
+        "Class project on 10,000 public records — not a medical test. "
+        "Fill in vitals, then analyze to see **Heart · No** or **Heart · Bad** on the 3D heart."
+    )
+    n_home = len(raw_df)
+    yes_home = int((raw_df[dp.TARGET_COL] == "Yes").sum())
+    no_home = n_home - yes_home
+    with st.container(key="quick_overview"):
+        st.markdown("**📊 QUICK OVERVIEW**")
+        qo_cards = [
+            ("qo_patients", "blue", ":material/groups:", "Patients", f"{n_home:,}"),
+            ("qo_no", "green", ":material/check_circle:", "No", f"{no_home / max(n_home, 1):.0%}"),
+            ("qo_yes", "red", ":material/monitor_heart:", "Yes", f"{yes_home / max(n_home, 1):.0%}"),
+            ("qo_models", "orange", ":material/hub:", "Models", "4"),
+        ]
+        for col, (key, color, icon, label, value) in zip(st.columns(4, gap="small"), qo_cards):
+            with col:
+                with st.container(border=True, key=key):
+                    st.metric(f"{icon} {label}", f":{color}[**{value}**]")
 
-    model_choice = st.selectbox("Select Diagnostic Model:", list(all_results.keys()))
-    best_model = all_results[model_choice]["best_model"]
+    extra_num = [c for c in numeric_cols if c not in FEATURED_NUM]
+    extra_cat = [c for c in categorical_cols if c not in FEATURED_CAT]
 
-    with st.form("predict_form"):
-        st.subheader("Patient Vitals & Diagnostics")
-        numeric_inputs = {}
-        cols = st.columns(3)
-        for i, col in enumerate(numeric_cols):
-            default = float(raw_df[col].median())
-            numeric_inputs[col] = cols[i % 3].number_input(col, value=default)
+    with st.container(key="live_console"):
+        st.markdown("### 💓 LIVE HEART RISK PREDICTOR")
+        model_choice = st.selectbox(
+            "🤖 Diagnostic Model",
+            list(all_results.keys()),
+            key="pred_model",
+            persist_state="session",
+        )
+        st.selectbox(
+            "👤 Patient profile",
+            [CUSTOM_PRESET] + list(PATIENT_PRESETS.keys()),
+            key="patient_preset",
+            on_change=_on_patient_preset,
+            persist_state="session",
+            help="Loads every form field at once so a reviewer can try the model without typing 15+ values.",
+        )
+        best_model = all_results[model_choice]["best_model"]
 
-        st.divider()
+        left, right = st.columns([1.2, 1.15], gap="large")
+        with left:
+            with st.container(key="live_vitals"):
+                st.markdown("**💗 PATIENT VITALS**")
+                v1, v2 = st.columns(2)
+                with v1:
+                    _num_widget("Age", raw_df["Age"].median())
+                with v2:
+                    bp_val = _num_widget("Blood Pressure", raw_df["Blood Pressure"].median())
+                v3, v4 = st.columns(2)
+                with v3:
+                    chol_val = _num_widget("Cholesterol Level", raw_df["Cholesterol Level"].median())
+                with v4:
+                    bmi_val = _num_widget("BMI", raw_df["BMI"].median())
+                v5, v6 = st.columns(2)
+                with v5:
+                    _num_widget("Sleep Hours", raw_df["Sleep Hours"].median())
+                with v6:
+                    if extra_num:
+                        _num_widget(extra_num[0], raw_df[extra_num[0]].median())
 
-        st.subheader("Patient History & Lifestyle")
-        categorical_inputs = {}
-        cols2 = st.columns(3)
-        for i, col in enumerate(categorical_cols):
-            if col in dp.ORDINAL_MAPS:
-                options = list(dp.ORDINAL_MAPS[col].keys())
-            else:
-                options = sorted(raw_df[col].dropna().unique().tolist())
-            categorical_inputs[col] = cols2[i % 3].selectbox(col, options)
+            with st.container(key="live_history"):
+                st.markdown("**🧬 PATIENT HISTORY & LIFESTYLE**")
+                h_rows = [FEATURED_CAT[:2], FEATURED_CAT[2:4], FEATURED_CAT[4:6]]
+                for row_cols in h_rows:
+                    hcs = st.columns(2)
+                    for i, col in enumerate(row_cols):
+                        if col in dp.ORDINAL_MAPS:
+                            options = list(dp.ORDINAL_MAPS[col].keys())
+                        else:
+                            options = sorted(raw_df[col].dropna().unique().tolist())
+                        with hcs[i]:
+                            _cat_widget(col, options)
 
-        st.markdown("<br>", unsafe_allow_html=True)
-        submit_col1, submit_col2, submit_col3 = st.columns([1, 2, 1])
-        with submit_col2:
-            submitted = st.form_submit_button("Generate Prediction", width="stretch")
+            leftover_num = extra_num[1:]
+            extra_items = [("num", col) for col in leftover_num]
+            extra_cats = list(extra_cat)
+            if leftover_num and "Sugar Consumption" in extra_cats:
+                extra_cats.remove("Sugar Consumption")
+                extra_items.append(("cat", "Sugar Consumption"))
+            extra_items.extend(("cat", col) for col in extra_cats)
+            if extra_items:
+                with st.expander("More labs & lifestyle"):
+                    for i in range(0, len(extra_items), 2):
+                        pair = extra_items[i:i + 2]
+                        ecs = st.columns(2)
+                        for j, (kind, col) in enumerate(pair):
+                            with ecs[j]:
+                                if kind == "num":
+                                    _num_widget(col, raw_df[col].median())
+                                elif col in dp.ORDINAL_MAPS:
+                                    _cat_widget(col, list(dp.ORDINAL_MAPS[col].keys()))
+                                else:
+                                    _cat_widget(
+                                        col,
+                                        sorted(raw_df[col].dropna().unique().tolist()),
+                                    )
 
-    if submitted:
-        raw_input = {**numeric_inputs, **categorical_inputs}
+        with right:
+            with st.container(key="live_stage"):
+                st.caption("💓 3D / Animated HEART")
+                heart_3d.render_beating_heart(
+                    risk_pct=last_risk,
+                    label=last_label,
+                    bpm=_estimated_bpm(),
+                    key="home_heart_3d",
+                    height=520,
+                )
+                pct_key = "heart_risk_pct_bad" if last_label == "Yes" else "heart_risk_pct"
+                with st.container(key=pct_key):
+                    if last_label == "Yes":
+                        st.metric(
+                            "Heart · Bad",
+                            f"{last_risk:.0f}% risk" if last_risk is not None else "—",
+                        )
+                        st.caption("At risk of heart disease.")
+                    elif last_label == "No":
+                        st.metric(
+                            "Heart · No",
+                            f"{last_risk:.0f}% risk" if last_risk is not None else "—",
+                        )
+                        st.caption("No heart disease.")
+                    else:
+                        st.metric("Heart risk", "Waiting")
+                        st.caption("Calculate risk to see Heart · No or Heart · Bad here.")
+
+                with st.container(key="cta_row", horizontal=True, gap="small"):
+                    analyze = st.button(
+                        "Calculate Risk",
+                        type="primary",
+                        width="stretch",
+                        key="analyze_heart",
+                        help="Run the selected model on the current form.",
+                    )
+                    st.button(
+                        "Reset Form",
+                        width="stretch",
+                        key="reset_form",
+                        on_click=_reset_patient_form,
+                        args=(raw_df, numeric_cols, categorical_cols),
+                        help="Restore dataset defaults and clear the last assessment.",
+                    )
+
+                if not live:
+                    with st.container(key="assess_ready"):
+                        st.markdown("🫀 **Assessment Ready**")
+                        st.caption("Fill the vitals, then press Calculate Risk.")
+                elif live["label"] == "Yes":
+                    with st.container(key="assess_high"):
+                        st.markdown("🔴 **HIGHER RISK**")
+                        st.markdown(
+                            f"**Prediction:** Yes  \n"
+                            f"**Model:** {live['model_choice']}"
+                        )
+                else:
+                    with st.container(key="assess_low"):
+                        st.markdown("🟢 **LOWER RISK**")
+                        st.markdown(
+                            f"**Prediction:** No  \n"
+                            f"**Model:** {live['model_choice']}"
+                        )
+
+                st.markdown("**Health Indicators**")
+                bp_now = st.session_state.get("pred_num_Blood Pressure", bp_val)
+                bmi_now = st.session_state.get("pred_num_BMI", bmi_val)
+                chol_now = st.session_state.get("pred_num_Cholesterol Level", chol_val)
+                bp_dot, bp_tag = _vital_flag("bp", bp_now)
+                bmi_dot, bmi_tag = _vital_flag("bmi", bmi_now)
+                chol_dot, chol_tag = _vital_flag("chol", chol_now)
+                st.markdown(
+                    f"- Blood Pressure: **{float(bp_now):.0f} mmHg** · {bp_dot} {bp_tag}  \n"
+                    f"- Body Mass Index: **{float(bmi_now):.2f} kg/m²** · {bmi_dot} {bmi_tag}  \n"
+                    f"- Cholesterol Level: **{float(chol_now):.0f} mg/dL** · {chol_dot} {chol_tag}"
+                )
+                history = st.session_state.get("risk_history") or []
+                if history:
+                    with st.container(border=True, key="visit_history"):
+                        last_visit = history[-1]
+                        st.markdown("**Visit history**")
+                        st.caption(
+                            f"{len(history)} visit{'s' if len(history) != 1 else ''} this session "
+                            f"· latest {last_visit['risk']:.0f}% ({last_visit['label']})"
+                        )
+                        hist_df = pd.DataFrame(history)
+                        st.line_chart(hist_df, x="visit", y="risk", height=96)
+
+    if analyze:
+        raw_input = {
+            **{col: st.session_state[f"pred_num_{col}"] for col in numeric_cols},
+            **{col: st.session_state[f"pred_cat_{col}"] for col in categorical_cols},
+        }
         row = dp.build_single_row_features(raw_input, categorical_cols, X.columns.tolist())
-
         pred = int(best_model.predict(row)[0])
         prob_disease = float(best_model.predict_proba(row)[0, 1])
         label = le_target.inverse_transform([pred])[0]
-
-        st.divider()
-        st.subheader("Prediction Result")
-
-
-        if pred == 1:
-            st.error(f"### ⚠️ Prediction: {label}")
-        else:
-            st.success(f"### ✅ Prediction: {label}")
-
-
-        fig_gauge = go.Figure(go.Indicator(
-            mode="gauge+number",
-            value=prob_disease * 100,
-            number={'suffix': "%", 'font': {'size': 28, 'color': '#333'}},
-            domain={'x': [0, 1], 'y': [0, 1]},
-            title={'text': "Calculated Risk Level", 'font': {'size': 18, 'color': '#555'}},
-            gauge={
-                'axis': {'range': [0, 100], 'tickwidth': 1, 'tickcolor': "darkblue"},
-                'bar': {'color': "rgba(0,0,0,0.5)", 'thickness': 0.25},
-                'bgcolor': "white",
-                'borderwidth': 2,
-                'bordercolor': "gray",
-                'steps': [
-                    {'range': [0, 30], 'color': "#d4edda"},
-                    {'range': [30, 70], 'color': "#ffeeba"},
-                    {'range': [70, 100], 'color': "#f8d7da"}
-                ],
-                'threshold': {
-                    'line': {'color': "red", 'width': 4},
-                    'thickness': 0.75,
-                    'value': prob_disease * 100
-                }
-            }
-        ))
-
-
-        fig_gauge.update_layout(height=250, margin=dict(l=20, r=20, t=40, b=20))
-
-
-        g_col1, g_col2, g_col3 = st.columns([1, 2, 1])
-        with g_col2:
-            st.plotly_chart(fig_gauge, width="stretch")
-
-        st.caption(f"Using **{model_choice}**")
-
         reason = explain_live_prediction(
-            model_choice, best_model, row, pred, prob_disease,
-            all_results[model_choice]["metrics"],
+            best_model, row, pred, prob_disease,
             raw_input=raw_input,
         )
         evidence_df, n_similar, n_rows = build_evidence_table(
             raw_input, raw_df, reason.get("highlight_fields"),
         )
-        with st.container(border=True):
+        st.session_state.last_risk_pct = prob_disease * 100
+        st.session_state.last_risk_label = label
+        _record_visit(prob_disease, label, model_choice)
+        st.session_state.live_pred = {
+            "pred": pred,
+            "prob_disease": prob_disease,
+            "label": label,
+            "model_choice": model_choice,
+            "reason": reason,
+            "evidence_df": evidence_df,
+            "n_similar": n_similar,
+            "n_rows": n_rows,
+            "raw_input": raw_input,
+            "when": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        }
+        st.rerun()
+
+    if live:
+        st.subheader("Prediction Result")
+        risk_gauge.render_total_risk_gauge(live["prob_disease"] * 100, live["label"])
+        reason = live["reason"]
+        evidence_df = live["evidence_df"]
+        n_similar = live["n_similar"]
+        n_rows = live["n_rows"]
+        if "not sure" in reason["headline"]:
+            panel_key = "explain_panel_unsure"
+        elif live["label"] == "Yes":
+            panel_key = "explain_panel_bad"
+        else:
+            panel_key = "explain_panel_ok"
+        with st.container(border=True, key=panel_key):
             st.markdown("**What this means**")
             st.markdown(reason["headline"])
             st.caption(reason["meaning"])
@@ -1179,26 +2102,61 @@ if page == "🏠 Home (Predict & Overview)":
                     "so a very low or high percentage is still not a medical all-clear."
                 )
             st.caption(reason["note"])
+            pdf_bytes = build_assessment_pdf(live, st.session_state.get("risk_history") or [])
+            st.download_button(
+                "Export Assessment",
+                data=pdf_bytes,
+                file_name=f"heart_risk_assessment_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
+                mime="application/pdf",
+                width="stretch",
+                icon=":material/download:",
+                key="export_assessment_pdf",
+                help="Download a printable PDF with inputs, model output, and the risk bar.",
+            )
 
     st.divider()
-    st.subheader("🧭 Explore Further")
-    explore_col1, explore_col2 = st.columns(2)
-    with explore_col1:
-        with st.container(border=True):
-            st.markdown("**🔍 See the Dataset**")
-            st.caption(
-                "10,000 patient records, class balance, missing-value patterns, correlations, "
-                "and sample rows — the full exploratory analysis behind this predictor."
-            )
-            st.markdown("Open **🔍 EDA** from the sidebar under *For Reviewers (Technical)*.")
-    with explore_col2:
-        with st.container(border=True):
-            st.markdown("**📊 See the Models**")
-            st.caption(
-                "Full metrics for all 4 algorithms, and why Random Forest is the report's "
-                "recommended pick even though KNN scores a marginally higher ROC-AUC."
-            )
-            st.markdown("Open **📊 Model Comparison** from the sidebar under *For Everyone*.")
+    def _open_explore_page(page_name):
+        st.session_state.current_page = page_name
+        if page_name in MAIN_PAGES:
+            st.session_state.main_page_radio = page_name
+            st.session_state.more_page_radio = None
+        else:
+            st.session_state.more_page_radio = page_name
+
+    with st.container(key="explore_further"):
+        st.subheader("🧭 Explore Further")
+        st.caption("Jump from this predictor into the analysis that sits behind it.")
+        explore_col1, explore_col2 = st.columns(2, gap="medium")
+        with explore_col1:
+            with st.container(border=True, key="explore_eda"):
+                st.badge("For reviewers", color="green")
+                st.markdown("### 🔍 See the Dataset")
+                st.caption(
+                    "10,000 patient records, class balance, missing-value patterns, "
+                    "correlations, and sample rows — the full exploratory analysis behind this predictor."
+                )
+                st.button(
+                    "Open Exploratory Analysis",
+                    key="go_eda",
+                    width="stretch",
+                    on_click=_open_explore_page,
+                    args=("🔍 EDA",),
+                )
+        with explore_col2:
+            with st.container(border=True, key="explore_models"):
+                st.badge("For everyone", color="blue")
+                st.markdown("### 📊 See the Models")
+                st.caption(
+                    "Full metrics for all 4 algorithms, and why Random Forest is the report's "
+                    "recommended pick even though KNN scores a marginally higher ROC-AUC."
+                )
+                st.button(
+                    "Open Model Comparison",
+                    key="go_models",
+                    width="stretch",
+                    on_click=_open_explore_page,
+                    args=("📊 Model Comparison",),
+                )
 
 
 elif page == "🔍 EDA":
@@ -1209,7 +2167,7 @@ elif page == "🔍 EDA":
     )
 
     eda_figs = prefetch_eda_plots(raw_df, numeric_cols, categorical_cols)
-    outlier_df, table_numeric, table_categorical, fig_assoc, mcar_df, fig_mcar, fig_corr, anova_df, chi2_df = prefetch_stats(raw_df, numeric_cols, categorical_cols, X, y)
+    outlier_df, table_numeric, table_categorical, fig_assoc, _, _, _, _, _ = prefetch_stats(raw_df, numeric_cols, categorical_cols, X, y)
 
     st.subheader(":material/database: Dataset snapshot")
     st.caption(
@@ -1325,6 +2283,15 @@ elif page == "🔍 EDA":
             colB.dataframe(table_categorical, width="stretch")
 
         with st.container(border=True):
+            st.markdown("**3D patient cloud**")
+            st.caption(
+                "Age × BMI × cholesterol for a sample of records. Rotate the cloud — "
+                "if the two colors formed separate clusters, a classifier would have an easy job. "
+                "Here they occupy almost the same space."
+            )
+            st.plotly_chart(heart_3d.plot_patient_cloud_3d(raw_df, dp.TARGET_COL), width="stretch")
+
+        with st.container(border=True):
             st.markdown("**Numeric features split by target**")
             st.caption("If a field predicted disease, the Yes and No boxes would sit at different levels. Overlapping boxes mean the two groups look the same.")
             st.pyplot(eda_figs["num_by_target"])
@@ -1333,6 +2300,16 @@ elif page == "🔍 EDA":
             st.markdown("**Disease rate by category**")
             st.caption("Share of Yes within each category. If every bar is near the overall 20% rate, that category does not change risk.")
             st.pyplot(eda_figs["cat_rate"])
+
+        with st.container(border=True):
+            st.markdown("**Category counts by heart disease status**")
+            st.caption("How many patients sit in each category, split into Yes and No. Taller No bars are expected because about 80% of the file is No.")
+            st.pyplot(eda_figs["cat_counts"])
+
+        with st.container(border=True):
+            st.markdown("**Category mix (% Yes vs No)**")
+            st.caption("Within each category, the share that is Yes vs No. The dashed line is the overall 20% Yes rate. Bars stuck near that line mean the category does not shift risk.")
+            st.pyplot(eda_figs["cat_pct"])
 
     with eda_tab3:
         st.subheader("Data quality & outliers")
@@ -1375,13 +2352,14 @@ elif page == "🔍 EDA":
 elif page == "🧹 Preprocessing":
     st.title("🧹 Data Preprocessing")
 
-    outlier_df, table_numeric, table_categorical, fig_assoc, mcar_df, fig_mcar, fig_corr, anova_df, chi2_df = prefetch_stats(raw_df, numeric_cols, categorical_cols, X, y)
+    _, _, _, _, _, fig_mcar, fig_corr, anova_df, chi2_df = prefetch_stats(raw_df, numeric_cols, categorical_cols, X, y)
 
-    prep_tab1, prep_tab2, prep_tab3 = st.tabs([
-        "❓ Missing Values",
-        "🔠 Encoding",
-        "✅ Feature Diagnostics"
-    ])
+    with st.container(key="prep_category_tabs"):
+        prep_tab1, prep_tab2, prep_tab3 = st.tabs([
+            "❓ Missing Values",
+            "🔠 Encoding",
+            "✅ Feature Diagnostics"
+        ])
 
     with prep_tab1:
         col_m1, col_m2 = st.columns(2)
@@ -1461,8 +2439,21 @@ elif page == "📊 Model Comparison":
     st.html(
         """
         <style>
+        .st-key-eval_metrics_row [data-testid="stHorizontalBlock"] {
+            align-items: stretch !important;
+        }
+        .st-key-eval_metrics_row [data-testid="stColumn"] {
+            display: flex !important;
+            flex-direction: column !important;
+        }
+        .st-key-eval_metrics_row [data-testid="stColumn"] > div,
+        .st-key-compare_knn, .st-key-compare_logreg, .st-key-compare_rf, .st-key-compare_dt {
+            height: 100% !important;
+            flex: 1 1 auto !important;
+        }
         .st-key-compare_knn, .st-key-compare_logreg, .st-key-compare_rf, .st-key-compare_dt {
             border-radius: 14px !important;
+            box-shadow: 0 8px 18px rgba(22, 35, 43, 0.07) !important;
         }
         .st-key-compare_knn {
             background: linear-gradient(180deg, #fde8ea 0%, #ffffff 42%) !important;
@@ -1484,33 +2475,82 @@ elif page == "📊 Model Comparison":
             border: 1px solid #efd48a !important;
             border-top: 6px solid #d4a017 !important;
         }
-        .st-key-compare_knn [data-testid="stMetric"]:last-of-type,
-        .st-key-compare_logreg [data-testid="stMetric"]:last-of-type,
-        .st-key-compare_rf [data-testid="stMetric"]:last-of-type,
-        .st-key-compare_dt [data-testid="stMetric"]:last-of-type {
-            background: rgba(255,255,255,0.85);
+        .st-key-eval_metrics_row [data-testid="stMetric"] {
+            background: transparent !important;
+            border: none !important;
+            box-shadow: none !important;
+            padding: 0.15rem 0.05rem 0.35rem !important;
+            backdrop-filter: none !important;
+        }
+        .st-key-eval_metrics_row [data-testid="stMetric"]:hover {
+            transform: none !important;
+            box-shadow: none !important;
+        }
+        .st-key-eval_metrics_row [data-testid="stMetricLabel"] {
+            color: #64748b !important;
+            font-size: 0.72rem !important;
+            font-weight: 700 !important;
+        }
+        .st-key-eval_metrics_row [data-testid="stMetricValue"] {
+            font-size: 1.55rem !important;
+            font-weight: 800 !important;
+        }
+        .st-key-compare_knn [data-testid="stMetricValue"],
+        .st-key-compare_knn [data-testid="stMetricValue"] p,
+        .st-key-compare_knn [data-testid="stMetricValue"] .stMarkdownColoredText {
+            color: #9f1239 !important;
+        }
+        .st-key-compare_logreg [data-testid="stMetricValue"],
+        .st-key-compare_logreg [data-testid="stMetricValue"] p,
+        .st-key-compare_logreg [data-testid="stMetricValue"] .stMarkdownColoredText {
+            color: #0b5f4b !important;
+        }
+        .st-key-compare_rf [data-testid="stMetricValue"],
+        .st-key-compare_rf [data-testid="stMetricValue"] p,
+        .st-key-compare_rf [data-testid="stMetricValue"] .stMarkdownColoredText {
+            color: #1e4e6b !important;
+        }
+        .st-key-compare_dt [data-testid="stMetricValue"],
+        .st-key-compare_dt [data-testid="stMetricValue"] p,
+        .st-key-compare_dt [data-testid="stMetricValue"] .stMarkdownColoredText {
+            color: #8a5a00 !important;
+        }
+        .st-key-compare_knn_auc, .st-key-compare_logreg_auc,
+        .st-key-compare_rf_auc, .st-key-compare_dt_auc {
+            background: #f3f4f6 !important;
+            border: 1px solid #e5e7eb !important;
+            border-top: 1px solid #e5e7eb !important;
+            border-radius: 12px !important;
+            box-shadow: none !important;
+            margin-top: 0.35rem !important;
+        }
+        .st-key-compare_knn_auc [data-testid="stMetric"],
+        .st-key-compare_logreg_auc [data-testid="stMetric"],
+        .st-key-compare_rf_auc [data-testid="stMetric"],
+        .st-key-compare_dt_auc [data-testid="stMetric"] {
+            padding: 0.15rem 0.2rem 0.1rem !important;
         }
         </style>
         """
     )
-    model_cols = st.columns(4)
-    for col, (_, row) in zip(model_cols, best_df.iterrows()):
-        theme = card_theme[row["Model"]]
-        accent = theme["color"]
-        with col:
-            with st.container(border=True, key=theme["key"]):
-                st.markdown(f"{theme['icon']} :{accent}[**{row['Model']}**]")
-                with st.container(horizontal=True):
-                    st.badge(row["Pipeline"], color=theme["badge"])
-                    if row["Model"] == recommended_row["Model"]:
-                        st.badge("Recommended", icon=":material/emoji_events:", color="orange")
-                    elif row["Model"] == auc_leader_row["Model"]:
-                        st.badge("Highest ROC-AUC", icon=":material/trending_up:", color="gray")
-                st.metric("Accuracy", f"{row['Accuracy']:.4f}")
-                st.metric("Precision", f"{row['Precision']:.4f}")
-                st.metric("Recall", f"{row['Recall']:.4f}")
-                st.metric("F1-Score", f"{row['F1-Score']:.4f}")
-                st.metric("ROC-AUC", f"{row['ROC-AUC']:.4f}", border=True)
+    with st.container(key="eval_metrics_row"):
+        model_cols = st.columns(4, gap="medium")
+        for col, (_, row) in zip(model_cols, best_df.iterrows()):
+            theme = card_theme[row["Model"]]
+            accent = theme["color"]
+            with col:
+                with st.container(border=True, key=theme["key"]):
+                    st.markdown(f"{theme['icon']} :{accent}[**{row['Model']}**]")
+                    with st.container(horizontal=True):
+                        st.badge(row["Pipeline"], color=theme["badge"])
+                        if row["Model"] == recommended_row["Model"]:
+                            st.badge("Recommended", icon=":material/emoji_events:", color="orange")
+                        elif row["Model"] == auc_leader_row["Model"]:
+                            st.badge("Highest ROC-AUC", icon=":material/trending_up:", color="gray")
+                    for metric_name in ("Accuracy", "Precision", "Recall", "F1-Score"):
+                        st.metric(metric_name, f":{accent}[**{row[metric_name]:.4f}**]")
+                    with st.container(border=True, key=f"{theme['key']}_auc"):
+                        st.metric("ROC-AUC", f":{accent}[**{row['ROC-AUC']:.4f}**]")
 
     st.dataframe(
         metrics_view.style
@@ -1532,11 +2572,22 @@ elif page == "📊 Model Comparison":
             f"and the report's recommended model (**{recommended_row['ROC-AUC']:.4f}**)."
         )
 
-    acc_row = best_df.loc[best_df["Accuracy"].idxmax()]
-    rec_row = best_df.loc[best_df["Recall"].idxmax()]
-    f1_row = best_df.loc[best_df["F1-Score"].idxmax()]
-    no_share = float((y == 0).mean())
-    max_auc = float(best_df["ROC-AUC"].max())
+    st.subheader("📈 ROC-AUC of the 4 selected pipelines")
+    st.caption(
+        "Figure 6.2 — test-set ROC-AUC of each **Basic** pipeline (the four kept for comparison). "
+        "Values match the cards above (4 d.p.). The dashed line is chance (0.50)."
+    )
+    auc_left, auc_mid, auc_right = st.columns([0.4, 3.2, 0.4])
+    with auc_mid:
+        st.pyplot(plot_selected_pipelines_roc_auc(
+            basic_results,
+            {
+                "KNN": knn_basic_data["y_test"],
+                "Logistic Regression": lr_basic_data["y_test"],
+                "Random Forest": rf_basic_data["y_test"],
+                "Decision Tree": dt_basic_data["y_test"],
+            },
+        ))
 
     st.subheader("🧭 Feature Importance (Top 10)")
     with st.container(border=True):
@@ -1546,12 +2597,15 @@ elif page == "📊 Model Comparison":
             imp_rf = rfm.get_permutation_importance(best_results["Random Forest"]["best_model"], rf_X_test, rf_y_test).head(10)
             imp_dt = dtm.get_permutation_importance(best_results["Decision Tree"]["best_model"], dt_X_test, dt_y_test).head(10)
 
-            feature_summary = pd.DataFrame({
-                "Rank": range(1, 11),
+            feature_by_model = {
                 "KNN": [f"{r.Feature} ({r.Importance:.3f})" for r in imp_knn.itertuples()],
                 "Logistic Regression": [f"{r.Feature} ({r.Coefficient:+.3f})" for r in coef_lr.itertuples()],
                 "Random Forest": [f"{r.Feature} ({r.Importance:.3f})" for r in imp_rf.itertuples()],
                 "Decision Tree": [f"{r.Feature} ({r.Importance:.3f})" for r in imp_dt.itertuples()],
+            }
+            feature_summary = pd.DataFrame({
+                "Rank": range(1, 11),
+                **{name: feature_by_model[name] for name in MODEL_ORDER},
             })
         st.dataframe(feature_summary, width="stretch", hide_index=True)
 
@@ -1630,7 +2684,7 @@ elif page == "⚖️ Basic vs SMOTE":
     with model_tabs[0]:
         st.header("K-Nearest Neighbors (KNN)")
 
-        st.subheader("📊 Baseline Metrics (& Impact of SMOTE)")
+        st.subheader("📊 High-Level Metrics Impact : SMOTE vs. Basic")
 
         basic = results_df.iloc[0]
         smote = results_df.iloc[1]
@@ -1638,7 +2692,7 @@ elif page == "⚖️ Basic vs SMOTE":
         def get_delta(metric):
             return float(smote[metric] - basic[metric])
 
-        render_smote_delta_kpis("knn", basic, get_delta)
+        render_smote_delta_kpis("knn", smote, get_delta)
 
         st.divider()
 
@@ -1662,44 +2716,19 @@ elif page == "⚖️ Basic vs SMOTE":
         st.divider()
 
 
-        st.subheader("🔍 Class-by-Class Breakdown")
-
-        col_basic, col_smote = st.columns(2)
         models_list = list(results.keys())
-
-
-        with col_basic:
-            res_basic = results[models_list[0]]
-            st.markdown(f"### 🔵 {models_list[0]}")
-            st.info(f"**🎯 Overall Accuracy:** {res_basic['metrics']['Accuracy']:.2%} &nbsp; | &nbsp; **📈 ROC-AUC:** {res_basic['metrics']['ROC-AUC']:.2%}")
-
-            report_basic = km.classification_report(y_test, res_basic["y_pred"], output_dict=True, zero_division=0)
-            df_rep_basic = pd.DataFrame(report_basic).transpose()
-            df_rep_basic.rename(index={'0': 'No Disease (0)', '1': 'Disease (1)', 'macro avg': 'Macro Avg', 'weighted avg': 'Weighted Avg'}, inplace=True)
-            df_rep_basic = df_rep_basic.drop(index=['accuracy'], errors='ignore').drop(columns=['support'], errors='ignore')
-
-            st.dataframe(df_rep_basic.style.background_gradient(cmap='Blues').format("{:.3f}"), width="stretch")
-
-
-            with st.expander("⚙️ View Basic Hyperparameters"):
-                st.json(res_basic['metrics']['Best Params'])
-
-
-        with col_smote:
-            res_smote = results[models_list[1]]
-            st.markdown(f"### 🟢 {models_list[1]}")
-            st.success(f"**🎯 Overall Accuracy:** {res_smote['metrics']['Accuracy']:.2%} &nbsp; | &nbsp; **📈 ROC-AUC:** {res_smote['metrics']['ROC-AUC']:.2%}")
-
-            report_smote = km.classification_report(y_test, res_smote["y_pred"], output_dict=True, zero_division=0)
-            df_rep_smote = pd.DataFrame(report_smote).transpose()
-            df_rep_smote.rename(index={'0': 'No Disease (0)', '1': 'Disease (1)', 'macro avg': 'Macro Avg', 'weighted avg': 'Weighted Avg'}, inplace=True)
-            df_rep_smote = df_rep_smote.drop(index=['accuracy'], errors='ignore').drop(columns=['support'], errors='ignore')
-
-            st.dataframe(df_rep_smote.style.background_gradient(cmap='Greens').format("{:.3f}"), width="stretch")
-
-
-            with st.expander("⚙️ View SMOTE Hyperparameters"):
-                st.json(res_smote['metrics']['Best Params'])
+        res_basic = results[models_list[0]]
+        res_smote = results[models_list[1]]
+        render_basic_vs_smote_eval(
+            "K-Nearest Neighbors",
+            res_basic["metrics"],
+            res_smote["metrics"],
+            [
+                ("Distance", "knn", "metric", "metric"),
+                ("k (neighbors)", "knn", "n_neighbors", "plain"),
+            ],
+            "k and the distance metric",
+        )
 
 
         st.divider()
@@ -1766,40 +2795,21 @@ elif page == "⚖️ Basic vs SMOTE":
         st.divider()
 
 
-        st.subheader("🔍 Class-by-Class Breakdown")
-
-        col_lr_basic, col_lr_smote = st.columns(2)
         lr_models_list = list(results_lr.keys())
-
-        with col_lr_basic:
-            res_lr_basic = results_lr[lr_models_list[0]]
-            st.markdown(f"### 🔵 {lr_models_list[0]}")
-            st.info(f"**🎯 Overall Accuracy:** {res_lr_basic['metrics']['Accuracy']:.2%} &nbsp; | &nbsp; **📈 ROC-AUC:** {res_lr_basic['metrics']['ROC-AUC']:.2%}")
-
-            report_lr_basic = lgm.classification_report(y_test_lr, res_lr_basic["y_pred"], output_dict=True, zero_division=0)
-            df_rep_lr_basic = pd.DataFrame(report_lr_basic).transpose()
-            df_rep_lr_basic.rename(index={'0': 'No Disease (0)', '1': 'Disease (1)', 'macro avg': 'Macro Avg', 'weighted avg': 'Weighted Avg'}, inplace=True)
-            df_rep_lr_basic = df_rep_lr_basic.drop(index=['accuracy'], errors='ignore').drop(columns=['support'], errors='ignore')
-
-            st.dataframe(df_rep_lr_basic.style.background_gradient(cmap='Blues').format("{:.3f}"), width="stretch")
-
-            with st.expander("⚙️ View Basic Hyperparameters"):
-                st.json(res_lr_basic['metrics']['Best Params'])
-
-        with col_lr_smote:
-            res_lr_smote = results_lr[lr_models_list[1]]
-            st.markdown(f"### 🟢 {lr_models_list[1]}")
-            st.success(f"**🎯 Overall Accuracy:** {res_lr_smote['metrics']['Accuracy']:.2%} &nbsp; | &nbsp; **📈 ROC-AUC:** {res_lr_smote['metrics']['ROC-AUC']:.2%}")
-
-            report_lr_smote = lgm.classification_report(y_test_lr, res_lr_smote["y_pred"], output_dict=True, zero_division=0)
-            df_rep_lr_smote = pd.DataFrame(report_lr_smote).transpose()
-            df_rep_lr_smote.rename(index={'0': 'No Disease (0)', '1': 'Disease (1)', 'macro avg': 'Macro Avg', 'weighted avg': 'Weighted Avg'}, inplace=True)
-            df_rep_lr_smote = df_rep_lr_smote.drop(index=['accuracy'], errors='ignore').drop(columns=['support'], errors='ignore')
-
-            st.dataframe(df_rep_lr_smote.style.background_gradient(cmap='Greens').format("{:.3f}"), width="stretch")
-
-            with st.expander("⚙️ View SMOTE Hyperparameters"):
-                st.json(res_lr_smote['metrics']['Best Params'])
+        res_lr_basic = results_lr[lr_models_list[0]]
+        res_lr_smote = results_lr[lr_models_list[1]]
+        render_basic_vs_smote_eval(
+            "Logistic Regression",
+            res_lr_basic["metrics"],
+            res_lr_smote["metrics"],
+            [
+                ("C", "logreg", "C", "plain"),
+                ("Penalty", "logreg", "penalty", "penalty"),
+                ("Solver", "logreg", "solver", "plain"),
+                ("Class Weight", "logreg", "class_weight", "weight"),
+            ],
+            "C, penalty, solver, and class weight",
+        )
 
         st.divider()
 
@@ -1871,42 +2881,21 @@ elif page == "⚖️ Basic vs SMOTE":
         st.divider()
 
 
-        st.subheader("🔍 Class-by-Class Breakdown")
-
-        rf_col_basic, rf_col_smote = st.columns(2)
         rf_models_list = list(rf_results.keys())
-
-
-        with rf_col_basic:
-            rf_res_basic = rf_results[rf_models_list[0]]
-            st.markdown(f"### 🔵 {rf_models_list[0]}")
-            st.info(f"**🎯 Overall Accuracy:** {rf_res_basic['metrics']['Accuracy']:.2%} &nbsp; | &nbsp; **📈 ROC-AUC:** {rf_res_basic['metrics']['ROC-AUC']:.2%}")
-
-            rf_report_basic = rfm.classification_report(rf_y_test, rf_res_basic["y_pred"], output_dict=True, zero_division=0)
-            rf_df_rep_basic = pd.DataFrame(rf_report_basic).transpose()
-            rf_df_rep_basic.rename(index={'0': 'No Disease (0)', '1': 'Disease (1)', 'macro avg': 'Macro Avg', 'weighted avg': 'Weighted Avg'}, inplace=True)
-            rf_df_rep_basic = rf_df_rep_basic.drop(index=['accuracy'], errors='ignore').drop(columns=['support'], errors='ignore')
-
-            st.dataframe(rf_df_rep_basic.style.background_gradient(cmap='Blues').format("{:.3f}"), width="stretch")
-
-            with st.expander("⚙️ View Basic Hyperparameters"):
-                st.json(rf_res_basic['metrics']['Best Params'])
-
-
-        with rf_col_smote:
-            rf_res_smote = rf_results[rf_models_list[1]]
-            st.markdown(f"### 🟢 {rf_models_list[1]}")
-            st.success(f"**🎯 Overall Accuracy:** {rf_res_smote['metrics']['Accuracy']:.2%} &nbsp; | &nbsp; **📈 ROC-AUC:** {rf_res_smote['metrics']['ROC-AUC']:.2%}")
-
-            rf_report_smote = rfm.classification_report(rf_y_test, rf_res_smote["y_pred"], output_dict=True, zero_division=0)
-            rf_df_rep_smote = pd.DataFrame(rf_report_smote).transpose()
-            rf_df_rep_smote.rename(index={'0': 'No Disease (0)', '1': 'Disease (1)', 'macro avg': 'Macro Avg', 'weighted avg': 'Weighted Avg'}, inplace=True)
-            rf_df_rep_smote = rf_df_rep_smote.drop(index=['accuracy'], errors='ignore').drop(columns=['support'], errors='ignore')
-
-            st.dataframe(rf_df_rep_smote.style.background_gradient(cmap='Greens').format("{:.3f}"), width="stretch")
-
-            with st.expander("⚙️ View SMOTE Hyperparameters"):
-                st.json(rf_res_smote['metrics']['Best Params'])
+        rf_res_basic = rf_results[rf_models_list[0]]
+        rf_res_smote = rf_results[rf_models_list[1]]
+        render_basic_vs_smote_eval(
+            "Random Forest",
+            rf_res_basic["metrics"],
+            rf_res_smote["metrics"],
+            [
+                ("Trees", "rf", "n_estimators", "plain"),
+                ("Max Depth", "rf", "max_depth", "plain"),
+                ("Min Samples Leaf", "rf", "min_samples_leaf", "plain"),
+                ("Class Weight", "rf", "class_weight", "weight"),
+            ],
+            "number of trees, max depth, min samples leaf, and class weight",
+        )
 
 
         st.divider()
@@ -1973,42 +2962,20 @@ elif page == "⚖️ Basic vs SMOTE":
         st.divider()
 
 
-        st.subheader("🔍 Class-by-Class Breakdown")
-
-        dt_col_basic, dt_col_smote = st.columns(2)
         dt_models_list = list(dt_results.keys())
-
-
-        with dt_col_basic:
-            dt_res_basic = dt_results[dt_models_list[0]]
-            st.markdown(f"### 🔵 {dt_models_list[0]}")
-            st.info(f"**🎯 Overall Accuracy:** {dt_res_basic['metrics']['Accuracy']:.2%} &nbsp; | &nbsp; **📈 ROC-AUC:** {dt_res_basic['metrics']['ROC-AUC']:.2%}")
-
-            dt_report_basic = dtm.classification_report(dt_y_test, dt_res_basic["y_pred"], output_dict=True, zero_division=0)
-            dt_df_rep_basic = pd.DataFrame(dt_report_basic).transpose()
-            dt_df_rep_basic.rename(index={'0': 'No Disease (0)', '1': 'Disease (1)', 'macro avg': 'Macro Avg', 'weighted avg': 'Weighted Avg'}, inplace=True)
-            dt_df_rep_basic = dt_df_rep_basic.drop(index=['accuracy'], errors='ignore').drop(columns=['support'], errors='ignore')
-
-            st.dataframe(dt_df_rep_basic.style.background_gradient(cmap='Blues').format("{:.3f}"), width="stretch")
-
-            with st.expander("⚙️ View Basic Hyperparameters"):
-                st.json(dt_res_basic['metrics']['Best Params'])
-
-
-        with dt_col_smote:
-            dt_res_smote = dt_results[dt_models_list[1]]
-            st.markdown(f"### 🟢 {dt_models_list[1]}")
-            st.success(f"**🎯 Overall Accuracy:** {dt_res_smote['metrics']['Accuracy']:.2%} &nbsp; | &nbsp; **📈 ROC-AUC:** {dt_res_smote['metrics']['ROC-AUC']:.2%}")
-
-            dt_report_smote = dtm.classification_report(dt_y_test, dt_res_smote["y_pred"], output_dict=True, zero_division=0)
-            dt_df_rep_smote = pd.DataFrame(dt_report_smote).transpose()
-            dt_df_rep_smote.rename(index={'0': 'No Disease (0)', '1': 'Disease (1)', 'macro avg': 'Macro Avg', 'weighted avg': 'Weighted Avg'}, inplace=True)
-            dt_df_rep_smote = dt_df_rep_smote.drop(index=['accuracy'], errors='ignore').drop(columns=['support'], errors='ignore')
-
-            st.dataframe(dt_df_rep_smote.style.background_gradient(cmap='Greens').format("{:.3f}"), width="stretch")
-
-            with st.expander("⚙️ View SMOTE Hyperparameters"):
-                st.json(dt_res_smote['metrics']['Best Params'])
+        dt_res_basic = dt_results[dt_models_list[0]]
+        dt_res_smote = dt_results[dt_models_list[1]]
+        render_basic_vs_smote_eval(
+            "Decision Tree",
+            dt_res_basic["metrics"],
+            dt_res_smote["metrics"],
+            [
+                ("Criterion", "dt", "criterion", "plain"),
+                ("Max Depth", "dt", "max_depth", "plain"),
+                ("Min Samples Leaf", "dt", "min_samples_leaf", "plain"),
+            ],
+            "criterion, max depth, and min samples leaf",
+        )
 
 
         st.divider()
