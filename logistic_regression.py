@@ -1,6 +1,7 @@
 #Import Library
 import os
 import json
+import math
 
 import numpy as np
 import pandas as pd
@@ -224,7 +225,7 @@ def plot_metric_comparison(results_df):
     plt.title("Basic vs SMOTE Logistic Regression -- Metric Comparison (70/30 split)")
     plt.legend(title=None, loc="lower right")
     for container in plt.gca().containers:
-        plt.gca().bar_label(container, fmt="%.2f", fontsize=8, padding=2)
+        plt.gca().bar_label(container, fmt=lambda v: f"{math.floor(v * 100 + 0.5) / 100:.2f}", fontsize=8, padding=2)
     plt.tight_layout()
     return plt.gcf()
 
