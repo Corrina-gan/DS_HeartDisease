@@ -355,6 +355,257 @@ def render_smote_delta_kpis(prefix, row, delta_fn):
                 )
 
 
+def _pipeline_input_for_clf(pipeline, row):
+    """Apply every transform before the classifier (scaler yes, SMOTE no)."""
+    Xt = row
+    clf_names = {"knn", "logreg", "dt", "rf"}
+    for name, step in pipeline.steps:
+        if name in clf_names:
+            break
+        if name == "smote" or not hasattr(step, "transform"):
+            continue
+        Xt = step.transform(Xt)
+    return np.asarray(Xt, dtype=float)
+
+
+def _source_field(feature_name, raw_input):
+    """Map an encoded column name back to the form field the person filled in."""
+    if raw_input and feature_name in raw_input:
+        return feature_name, raw_input[feature_name]
+    if raw_input:
+        matches = [key for key in raw_input if feature_name.startswith(f"{key}_")]
+        if matches:
+            key = max(matches, key=len)
+            return key, raw_input[key]
+    return feature_name.replace("_", " "), None
+
+
+def _used_lines(feature_names, raw_input, effects=None):
+    """Up to 4 plain 'field: value — effect' lines, no encoded dummy names."""
+    lines = []
+    seen = set()
+    effects = effects or {}
+    for name in feature_names:
+        field, value = _source_field(name, raw_input)
+        if field in seen:
+            continue
+        seen.add(field)
+        effect = effects.get(name)
+        if value is None:
+            text = f"**{field}**"
+        else:
+            text = f"**{field}:** {value}"
+        if effect:
+            text += f" — {effect}"
+        lines.append(text)
+        if len(lines) >= 4:
+            break
+    return lines
+
+
+EVIDENCE_FIELDS = [
+    "Age",
+    "BMI",
+    "Blood Pressure",
+    "Cholesterol Level",
+    "Smoking",
+    "Diabetes",
+    "Exercise Habits",
+    "Family Heart Disease",
+]
+
+
+def _fmt_answer(col, value):
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return "—"
+    if col in ("Age", "Blood Pressure", "Cholesterol Level", "Triglyceride Level", "Fasting Blood Sugar"):
+        try:
+            return str(int(round(float(value))))
+        except (TypeError, ValueError):
+            return str(value)
+    if col in ("BMI", "Sleep Hours", "CRP Level", "Homocysteine Level"):
+        try:
+            return f"{float(value):.1f}"
+        except (TypeError, ValueError):
+            return str(value)
+    return str(value)
+
+
+@st.cache_data(show_spinner=False)
+def typical_answers_by_group(raw_df):
+    """Typical (median / most common) answer in the No group vs the Yes group."""
+    target = dp.TARGET_COL
+    no = raw_df[raw_df[target] == "No"]
+    yes = raw_df[raw_df[target] == "Yes"]
+    out = {}
+    for col in raw_df.columns:
+        if col == target:
+            continue
+        if pd.api.types.is_numeric_dtype(raw_df[col]):
+            out[col] = {"kind": "num", "no": no[col].median(), "yes": yes[col].median()}
+        else:
+            no_mode = no[col].dropna().mode()
+            yes_mode = yes[col].dropna().mode()
+            out[col] = {
+                "kind": "cat",
+                "no": None if no_mode.empty else no_mode.iloc[0],
+                "yes": None if yes_mode.empty else yes_mode.iloc[0],
+            }
+    return out
+
+
+def build_evidence_table(raw_input, raw_df, highlight_fields=None):
+    """Side-by-side: your answers vs typical Yes/No people in the dataset."""
+    typicals = typical_answers_by_group(raw_df)
+    ordered = []
+    seen = set()
+    for field in list(highlight_fields or []) + EVIDENCE_FIELDS:
+        if field in raw_input and field in typicals and field not in seen:
+            ordered.append(field)
+            seen.add(field)
+        if len(ordered) >= 8:
+            break
+
+    rows = []
+    similar_count = 0
+    for field in ordered:
+        spec = typicals[field]
+        you = _fmt_answer(field, raw_input.get(field))
+        no_s = _fmt_answer(field, spec["no"])
+        yes_s = _fmt_answer(field, spec["yes"])
+        if no_s == yes_s:
+            reading = "Looks similar in both groups"
+            similar_count += 1
+        elif spec["kind"] == "num":
+            try:
+                you_n, no_n, yes_n = float(you), float(no_s), float(yes_s)
+                reading = (
+                    "Closer to people without heart disease"
+                    if abs(you_n - no_n) < abs(you_n - yes_n)
+                    else "Closer to people with heart disease"
+                )
+            except ValueError:
+                reading = "See the numbers"
+        else:
+            if you == no_s and you != yes_s:
+                reading = "More common if no heart disease"
+            elif you == yes_s and you != no_s:
+                reading = "More common if heart disease"
+            else:
+                reading = "Common in both groups"
+                similar_count += 1
+        rows.append({
+            "Question": field,
+            "Your answer": you,
+            "Usually without heart disease": no_s,
+            "Usually with heart disease": yes_s,
+            "What this suggests": reading,
+        })
+    return pd.DataFrame(rows), similar_count, len(rows)
+
+
+def _original_fields(encoded_names, raw_input):
+    fields = []
+    seen = set()
+    for name in encoded_names:
+        field, _ = _source_field(name, raw_input)
+        if raw_input and field in raw_input and field not in seen:
+            seen.add(field)
+            fields.append(field)
+    return fields
+
+
+def explain_live_prediction(model_choice, pipeline, row, pred, prob_disease, metrics, raw_input=None):
+    """Short, non-technical reason for the live predictor."""
+    is_yes = pred == 1
+    pct = prob_disease * 100
+    if pct < 40:
+        headline = "The model thinks heart disease is **unlikely** for this person."
+    elif pct > 60:
+        headline = "The model thinks heart disease is **more likely** for this person."
+    else:
+        headline = "The model is **not sure** — this score is close to a coin flip."
+
+    meaning = (
+        f"It estimates about **{pct:.0f}%** chance of heart disease. "
+        "If that number is 50% or higher it answers **Yes**; otherwise it answers **No**. "
+        f"Here it answers **{'Yes' if is_yes else 'No'}**."
+    )
+
+    why = ""
+    highlight_fields = []
+    names = list(row.columns)
+    Xt = _pipeline_input_for_clf(pipeline, row)
+    x = Xt[0]
+    steps = pipeline.named_steps
+
+    if "knn" in steps:
+        knn = steps["knn"]
+        k = int(knn.n_neighbors)
+        _, idx = knn.kneighbors(Xt, n_neighbors=k)
+        neighbor_y = np.asarray(knn._y)[idx[0]]
+        n_yes = int(neighbor_y.sum())
+        n_no = k - n_yes
+        why = (
+            f"It compared this person with the **{k} most similar people** in our records. "
+            f"**{n_no} of {k}** did **not** have heart disease"
+            + (f", **{n_yes}** did." if n_yes else ".")
+            + " The table below shows some answers it used to judge “similar”."
+        )
+        highlight_fields = list(EVIDENCE_FIELDS)
+    elif "logreg" in steps:
+        logreg = steps["logreg"]
+        contrib = logreg.coef_[0] * x
+        order = np.argsort(-np.abs(contrib))
+        ranked = [names[i] for i in order if abs(contrib[i]) >= 1e-9]
+        why = (
+            "It added up the form answers. Some answers slightly raise the chance, "
+            "others slightly lower it. The first rows in the table are the ones that "
+            "moved this person's score the most."
+        )
+        highlight_fields = _original_fields(ranked, raw_input)
+    elif "dt" in steps:
+        tree = steps["dt"].tree_
+        node = 0
+        asked = []
+        while tree.children_left[node] != -1:
+            asked.append(names[int(tree.feature[node])])
+            feat_i = int(tree.feature[node])
+            if float(x[feat_i]) <= float(tree.threshold[node]):
+                node = int(tree.children_left[node])
+            else:
+                node = int(tree.children_right[node])
+        why = (
+            "It asked a few yes/no questions about the form, then grouped this person "
+            "with similar records. Those questions are listed first in the table."
+        )
+        highlight_fields = _original_fields(asked, raw_input)
+    elif "rf" in steps:
+        rf = steps["rf"]
+        tree_votes = np.array([est.predict(Xt)[0] for est in rf.estimators_])
+        n_yes = int(tree_votes.sum())
+        n_trees = len(tree_votes)
+        why = (
+            f"It asked many small sets of questions (**{n_trees} votes**) and took the majority. "
+            f"**{n_trees - n_yes}** voted No and **{n_yes}** voted Yes. "
+            "The first rows in the table are what it usually pays attention to."
+        )
+        top = pd.Series(rf.feature_importances_, index=names).sort_values(ascending=False).index.tolist()
+        highlight_fields = _original_fields(top, raw_input)
+
+    note = (
+        "This is a **class project demo** on 10,000 public records — not a medical test. "
+        "Please do not use this as a diagnosis."
+    )
+    return {
+        "headline": headline,
+        "meaning": meaning,
+        "why": why,
+        "highlight_fields": highlight_fields,
+        "note": note,
+    }
+
+
 @st.cache_data(show_spinner="Loading & preprocessing data...")
 def load_pipeline_data(path):
     return dp.run_pipeline(path)
@@ -472,7 +723,7 @@ def run_training_jobs(label, jobs):
     for i, (name, (func, X, y)) in enumerate(jobs.items(), start=1):
         progress.progress((i - 1) / total, text=f"{label} — training {name} ({i}/{total})...")
         outputs[name] = func(X, y)
-    progress.progress(1.0, text=f"{label} — done ✅")
+    progress.empty()
     return outputs
 
 
@@ -572,7 +823,7 @@ def _compute_robustness_checks(X, y):
     row, _, _ = _eval_pipeline("Random Forest", "+ interaction features", Pipeline([("rf", RandomForestClassifier(random_state=dp.RANDOM_STATE))]), rf_grid_current, "f1", X_train_eng, X_test_eng, y_train_eng, y_test_eng)
     rows.append(row)
 
-    progress.progress(1.0, text="Robustness checks — done ✅")
+    progress.empty()
 
     return pd.DataFrame(rows)
 
@@ -899,7 +1150,35 @@ if page == "🏠 Home (Predict & Overview)":
         with g_col2:
             st.plotly_chart(fig_gauge, width="stretch")
 
-        st.caption(f"Powered by {model_choice} ({best_pipeline_used[model_choice]} pipeline)")
+        st.caption(f"Using **{model_choice}**")
+
+        reason = explain_live_prediction(
+            model_choice, best_model, row, pred, prob_disease,
+            all_results[model_choice]["metrics"],
+            raw_input=raw_input,
+        )
+        evidence_df, n_similar, n_rows = build_evidence_table(
+            raw_input, raw_df, reason.get("highlight_fields"),
+        )
+        with st.container(border=True):
+            st.markdown("**What this means**")
+            st.markdown(reason["headline"])
+            st.caption(reason["meaning"])
+            st.markdown("**Why the model said that**")
+            st.markdown(reason["why"])
+            st.markdown("**Evidence from your answers**")
+            st.caption(
+                "Each row is one question from the form. "
+                "Compare **your answer** with typical people in our records who did / did not have heart disease."
+            )
+            st.dataframe(evidence_df, width="stretch", hide_index=True)
+            if n_rows and n_similar >= max(3, n_rows // 2):
+                st.caption(
+                    "Many of these answers look **almost the same** in both groups. "
+                    "That is a finding from our project: these questions do not clearly tell Yes from No, "
+                    "so a very low or high percentage is still not a medical all-clear."
+                )
+            st.caption(reason["note"])
 
     st.divider()
     st.subheader("🧭 Explore Further")
