@@ -1,5 +1,3 @@
-import os
-import json
 import math
 
 import pandas as pd
@@ -17,10 +15,9 @@ from imblearn.pipeline import Pipeline as ImbPipeline
 from imblearn.over_sampling import SMOTE
 from sklearn.inspection import permutation_importance
 
-from data_preprocessing import run_pipeline, RANDOM_STATE
+from data_preprocessing import RANDOM_STATE
 
 TEST_SIZE = 0.30
-OUTPUT_DIR = "outputs"
 
 KNN_SCORING = "f1"
 
@@ -35,13 +32,6 @@ SMOTE_PARAM_GRID = {
 
 sns.set_style("whitegrid")
 plt.rcParams["figure.figsize"] = (7, 5)
-
-
-def section(title):
-    width = 70
-    print("\n" + "=" * width)
-    print(title.center(width))
-    print("=" * width)
 
 
 # --------------------------------------------------------------------------
@@ -200,77 +190,3 @@ def plot_metric_comparison(results_df):
         plt.gca().bar_label(container, fmt=lambda v: f"{math.floor(v * 100 + 0.5) / 100:.2f}", fontsize=8, padding=2)
     plt.tight_layout()
     return plt.gcf()
-
-
-# --------------------------------------------------------------------------
-# Orchestration
-# --------------------------------------------------------------------------
-
-def run_knn_experiments(path="heart_disease.csv", save_outputs=True, show_plots=True):
-    data = run_pipeline(path)
-    X, y = data["X"], data["y"]
-
-    X_train, X_test, y_train, y_test = get_70_30_split(X, y)
-
-    section("1. Basic KNN (70/30 split)")
-    basic_results = tune_and_evaluate(
-        build_basic_pipeline(), BASIC_PARAM_GRID,
-        X_train, X_test, y_train, y_test, "1. Basic KNN",
-        scoring=KNN_SCORING,
-    )
-    print(f"Best Params: {basic_results['metrics']['Best Params']}")
-    print(f"Best CV {KNN_SCORING.upper()}: {basic_results['metrics'][f'CV {KNN_SCORING.upper()} (best)']}")
-    print(basic_results["classification_report"])
-
-    section("2. SMOTE KNN (70/30 split)")
-    smote_results = tune_and_evaluate(
-        build_smote_pipeline(), SMOTE_PARAM_GRID,
-        X_train, X_test, y_train, y_test, "2. SMOTE KNN",
-        scoring=KNN_SCORING,
-    )
-    print(f"Best Params: {smote_results['metrics']['Best Params']}")
-    print(f"Best CV {KNN_SCORING.upper()}: {smote_results['metrics'][f'CV {KNN_SCORING.upper()} (best)']}")
-    print(smote_results["classification_report"])
-
-    all_results = {"1. Basic KNN": basic_results, "2. SMOTE KNN": smote_results}
-    results_df = pd.DataFrame([basic_results["metrics"], smote_results["metrics"]])
-
-    section("Comparison: Basic KNN vs SMOTE KNN (70/30 split)")
-    print(results_df.drop(columns=["Best Params"]).to_string(index=False))
-
-    fig_cm = plot_confusion_matrices(all_results)
-    fig_roc = plot_roc_curves(all_results, y_test)
-    fig_metrics = plot_metric_comparison(results_df)
-    if show_plots:
-        plt.show()
-
-    if save_outputs:
-        os.makedirs(OUTPUT_DIR, exist_ok=True)
-
-        results_df.to_csv(os.path.join(OUTPUT_DIR, "knn_metrics_comparison.csv"), index=False)
-
-        json_ready = {
-            name: {
-                "metrics": res["metrics"],
-                "classification_report": res["classification_report"],
-                "confusion_matrix": res["confusion_matrix"].tolist(),
-            }
-            for name, res in all_results.items()
-        }
-        with open(os.path.join(OUTPUT_DIR, "knn_metrics.json"), "w") as f:
-            json.dump(json_ready, f, indent=2)
-
-        fig_cm.savefig(os.path.join(OUTPUT_DIR, "knn_confusion_matrices.png"), dpi=150, bbox_inches="tight")
-        fig_roc.savefig(os.path.join(OUTPUT_DIR, "knn_roc_curves.png"), dpi=150, bbox_inches="tight")
-        fig_metrics.savefig(os.path.join(OUTPUT_DIR, "knn_metric_comparison.png"), dpi=150, bbox_inches="tight")
-        print(f"\nSaved metrics + plots to ./{OUTPUT_DIR}/")
-        
-    return {
-        "X_train": X_train, "X_test": X_test, "y_train": y_train, "y_test": y_test,
-        "results": all_results,
-        "results_df": results_df,
-    }
-
-
-if __name__ == "__main__":
-    run_knn_experiments()
