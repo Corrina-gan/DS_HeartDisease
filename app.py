@@ -745,7 +745,6 @@ def render_basic_vs_smote_eval(model_name, basic_m, smote_m, hyperparams, tune_w
         f1_tail = "SMOTE improved this score and is kept for comparison."
 
     st.subheader("⚙️ Final Hyperparameter Configuration")
-    st.caption("Tuned settings and held-out test metrics for the Basic and SMOTE pipelines.")
 
     with st.container(border=True):
         st.markdown(f"**Final configuration — {model_name} (Basic vs SMOTE)**")
@@ -1322,7 +1321,6 @@ with st.sidebar:
         "<h2 style='text-align:center;margin-bottom:0.2rem;'>🫀 Heart Disease Risk</h2>",
         unsafe_allow_html=True,
     )
-    st.caption("Interactive clinical ML demo")
     st.divider()
     st.markdown("#### 👤 For Everyone")
 
@@ -1377,7 +1375,6 @@ with st.sidebar:
 
     with st.container(key="sidebar_footer"):
         st.caption("10,000-record public dataset · 4 models")
-        st.caption("Class project — not a medical diagnosis.")
 
     page = st.session_state.current_page
 
@@ -1850,10 +1847,6 @@ if page == "🏠 Home (Predict & Overview)":
     live = st.session_state.get("live_pred")
 
     st.title("Heart Disease Risk")
-    st.caption(
-        "Class project on 10,000 public records — not a medical test. "
-        "Fill in vitals, then analyze to see **Heart · No** or **Heart · Bad** on the 3D heart."
-    )
     n_home = len(raw_df)
     yes_home = int((raw_df[dp.TARGET_COL] == "Yes").sum())
     no_home = n_home - yes_home
@@ -2561,10 +2554,10 @@ elif page == "📊 Model Comparison":
     )
     if recommended_row["Model"] != auc_leader_row["Model"]:
         st.success(
-            f"🏆 **{recommended_row['Model']}** ({recommended_row['Pipeline']}) is the report's recommended model "
-            f"(ROC-AUC **{recommended_row['ROC-AUC']:.4f}**) — chosen over the nominal ROC-AUC leader, "
-            f"**{auc_leader_row['Model']}** (**{auc_leader_row['ROC-AUC']:.4f}**), because that margin is within "
-            "noise while Random Forest is more robust to the class imbalance and more interpretable."
+            f"🏆 **{recommended_row['Model']}** ({recommended_row['Pipeline']}) is the recommended model "
+            f"(ROC-AUC **{recommended_row['ROC-AUC']:.4f}**). Although **{auc_leader_row['Model']}** has a slightly "
+            f"higher ROC-AUC (**{auc_leader_row['ROC-AUC']:.4f}**), the difference is very small. "
+            "Random Forest was chosen because it is easier to understand and handles imbalanced data better."
         )
     else:
         st.success(
@@ -2573,10 +2566,6 @@ elif page == "📊 Model Comparison":
         )
 
     st.subheader("📈 ROC-AUC of the 4 selected pipelines")
-    st.caption(
-        "Figure 6.2 — test-set ROC-AUC of each **Basic** pipeline (the four kept for comparison). "
-        "Values match the cards above (4 d.p.). The dashed line is chance (0.50)."
-    )
     auc_left, auc_mid, auc_right = st.columns([0.4, 3.2, 0.4])
     with auc_mid:
         st.pyplot(plot_selected_pipelines_roc_auc(
