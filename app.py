@@ -455,7 +455,8 @@ st.html(
         box-shadow: 0 10px 28px rgba(22, 35, 43, 0.06) !important;
     }
     .st-key-heart_risk_pct,
-    .st-key-heart_risk_pct_bad {
+    .st-key-heart_risk_pct_bad,
+    .st-key-heart_risk_pct_unsure {
         background: #ffffff !important;
         border: 1px solid #d5e3e0 !important;
         border-radius: 14px !important;
@@ -464,31 +465,36 @@ st.html(
         box-shadow: 0 6px 16px rgba(22, 35, 43, 0.06) !important;
     }
     .st-key-heart_risk_pct [data-testid="stMetricValue"],
-    .st-key-heart_risk_pct_bad [data-testid="stMetricValue"] {
+    .st-key-heart_risk_pct_bad [data-testid="stMetricValue"],
+    .st-key-heart_risk_pct_unsure [data-testid="stMetricValue"] {
         font-size: 2rem !important;
         font-weight: 800 !important;
         letter-spacing: -0.03em;
         color: #0a5c56 !important;
     }
     .st-key-heart_risk_pct_bad [data-testid="stMetricValue"] { color: #be123c !important; }
+    .st-key-heart_risk_pct_unsure [data-testid="stMetricValue"] { color: #b45309 !important; }
     .st-key-heart_risk_pct [data-testid="stMetricLabel"],
-    .st-key-heart_risk_pct_bad [data-testid="stMetricLabel"] {
+    .st-key-heart_risk_pct_bad [data-testid="stMetricLabel"],
+    .st-key-heart_risk_pct_unsure [data-testid="stMetricLabel"] {
         font-weight: 700 !important;
         letter-spacing: 0.08em;
         text-transform: uppercase;
         color: #475569 !important;
     }
     .st-key-assess_ready,
-    .st-key-assess_high,
-    .st-key-assess_low {
+    .st-key-assess_bad,
+    .st-key-assess_ok,
+    .st-key-assess_unsure {
         background: #ffffff !important;
         border-radius: 0 12px 12px 0 !important;
         padding: 0.55rem 0.75rem 0.65rem 0.9rem !important;
         box-shadow: none !important;
     }
     .st-key-assess_ready { border-left: 3px solid #94a3b8 !important; border-top: none !important; border-right: none !important; border-bottom: none !important; }
-    .st-key-assess_high { border-left: 3px solid #e11d48 !important; border-top: none !important; border-right: none !important; border-bottom: none !important; }
-    .st-key-assess_low { border-left: 3px solid #0f766e !important; border-top: none !important; border-right: none !important; border-bottom: none !important; }
+    .st-key-assess_bad { border-left: 3px solid #e11d48 !important; border-top: none !important; border-right: none !important; border-bottom: none !important; }
+    .st-key-assess_ok { border-left: 3px solid #0f766e !important; border-top: none !important; border-right: none !important; border-bottom: none !important; }
+    .st-key-assess_unsure { border-left: 3px solid #ca8a04 !important; border-top: none !important; border-right: none !important; border-bottom: none !important; }
     .st-key-explain_panel_ok, .st-key-explain_panel_bad, .st-key-explain_panel_unsure {
         background: #ffffff !important;
         border: 1px solid #d5e3e0 !important;
@@ -838,8 +844,9 @@ def _fmt_answer(col, value):
 
 
 @st.cache_data(show_spinner=False)
-def typical_answers_by_group(raw_df):
+def typical_answers_by_group(_raw_df):
     """Typical (median / most common) answer in the No group vs the Yes group."""
+    raw_df = _raw_df
     target = dp.TARGET_COL
     no = raw_df[raw_df[target] == "No"]
     yes = raw_df[raw_df[target] == "Yes"]
@@ -910,6 +917,24 @@ def build_evidence_table(raw_input, raw_df, highlight_fields=None):
     return pd.DataFrame(rows), similar_count, len(rows)
 
 
+def _reason_bullets(evidence_df, max_bullets=3):
+    """Turn the evidence table into 2-3 short, scannable, plain-English lines —
+    only the rows that actually lean toward Yes or No. Rows where the answer
+    looked the same in both groups are skipped here (they don't explain
+    anything) but are still visible in the full table for anyone who wants
+    to check every row."""
+    skip = {"Looks similar in both groups", "Common in both groups", "See the numbers"}
+    bullets = []
+    for _, row in evidence_df.iterrows():
+        suggestion = row["What this suggests"]
+        if suggestion in skip:
+            continue
+        bullets.append(f"**{row['Question']}** ({row['Your answer']}) — {suggestion[0].lower()}{suggestion[1:]}")
+        if len(bullets) >= max_bullets:
+            break
+    return bullets
+
+
 def _original_fields(encoded_names, raw_input):
     fields = []
     seen = set()
@@ -921,21 +946,37 @@ def _original_fields(encoded_names, raw_input):
     return fields
 
 
-def explain_live_prediction(pipeline, row, pred, prob_disease, raw_input=None):
-    """Short, non-technical reason for the live predictor."""
-    is_yes = pred == 1
-    pct = prob_disease * 100
+def verdict_tier(pct):
+    """The one place that decides Unlikely / Unclear / More likely from a
+    score. Every verdict shown on screen (sidebar badge, gauge status,
+    explanation panel) calls this instead of each doing its own
+    Yes/No-vs-score check independently — that's what previously let the
+    sidebar say "LOWER RISK" (from the binary label) while the panel below
+    it said "Unclear" (from the score) for the exact same prediction.
+    """
     if pct < 40:
-        headline = "The model thinks heart disease is **unlikely** for this person."
-    elif pct > 60:
-        headline = "The model thinks heart disease is **more likely** for this person."
-    else:
-        headline = "The model is **not sure** — this score is close to a coin flip."
+        return {"word": "Unlikely", "icon": "🟢", "css": "ok", "badge": "LOWER RISK"}
+    if pct > 60:
+        return {"word": "More likely", "icon": "🔴", "css": "bad", "badge": "HIGHER RISK"}
+    return {"word": "Unclear", "icon": "🟡", "css": "unsure", "badge": "UNCLEAR"}
+
+
+def explain_live_prediction(pipeline, row, pred, prob_disease, raw_input=None):
+    """Short, non-technical reason for the live predictor.
+
+    Rewritten so someone with no data-science background can follow it:
+    a one-line verdict, what the percentage actually means, a plain-English
+    "how it decided" line for whichever model is active, and a clear
+    reminder that this project found the model close to a coin flip — so a
+    low score is reassuring, not a guarantee.
+    """
+    pct = prob_disease * 100
+    tier = verdict_tier(pct)
 
     meaning = (
-        f"It estimates about **{pct:.0f}%** chance of heart disease. "
-        "If that number is 50% or higher it answers **Yes**; otherwise it answers **No**. "
-        f"Here it answers **{'Yes' if is_yes else 'No'}**."
+        "This isn't measuring disease directly — it's comparing this form against patterns "
+        "found in 10,000 past records, then turning that comparison into a score out of 100. "
+        "**50 or above** becomes a \"Yes\"; below that is \"No\"."
     )
 
     why = ""
@@ -953,10 +994,11 @@ def explain_live_prediction(pipeline, row, pred, prob_disease, raw_input=None):
         n_yes = int(neighbor_y.sum())
         n_no = k - n_yes
         why = (
-            f"It compared this person with the **{k} most similar people** in our records. "
+            f"**How it decided:** it found the **{k} people in our records who answered most like this**, "
+            f"almost like looking up {k} similar patients. "
             f"**{n_no} of {k}** did **not** have heart disease"
-            + (f", **{n_yes}** did." if n_yes else ".")
-            + " The table below shows some answers it used to judge “similar”."
+            + (f" and **{n_yes}** did." if n_yes else ".")
+            + " It went with whichever group was bigger. The table below shows the answers it used to judge \"similar\"."
         )
         highlight_fields = list(EVIDENCE_FIELDS)
     elif "logreg" in steps:
@@ -965,9 +1007,10 @@ def explain_live_prediction(pipeline, row, pred, prob_disease, raw_input=None):
         order = np.argsort(-np.abs(contrib))
         ranked = [names[i] for i in order if abs(contrib[i]) >= 1e-9]
         why = (
-            "It added up the form answers. Some answers slightly raise the chance, "
-            "others slightly lower it. The first rows in the table are the ones that "
-            "moved this person's score the most."
+            "**How it decided:** picture a checklist where every answer either adds a few points "
+            "or takes a few away. It added those points up to get the score above. "
+            "The rows at the top of the table below moved this person's score the most — "
+            "the rest barely moved it at all."
         )
         highlight_fields = _original_fields(ranked, raw_input)
     elif "dt" in steps:
@@ -982,8 +1025,10 @@ def explain_live_prediction(pipeline, row, pred, prob_disease, raw_input=None):
             else:
                 node = int(tree.children_right[node])
         why = (
-            "It asked a few yes/no questions about the form, then grouped this person "
-            "with similar records. Those questions are listed first in the table."
+            "**How it decided:** it worked through a short series of yes/no questions about the "
+            "form, like a flowchart, and ended up with a group of similar past patients. "
+            "Whatever that group mostly was — Yes or No — became the answer. "
+            "Those questions are listed first in the table below."
         )
         highlight_fields = _original_fields(asked, raw_input)
     elif "rf" in steps:
@@ -992,19 +1037,22 @@ def explain_live_prediction(pipeline, row, pred, prob_disease, raw_input=None):
         n_yes = int(tree_votes.sum())
         n_trees = len(tree_votes)
         why = (
-            f"It asked many small sets of questions (**{n_trees} votes**) and took the majority. "
+            f"**How it decided:** it's really **{n_trees} small decision-makers voting**, each one "
+            "looking at the form slightly differently, then going with the majority. "
             f"**{n_trees - n_yes}** voted No and **{n_yes}** voted Yes. "
-            "The first rows in the table are what it usually pays attention to."
+            "The table below shows the answers it usually pays the most attention to."
         )
         top = pd.Series(rf.feature_importances_, index=names).sort_values(ascending=False).index.tolist()
         highlight_fields = _original_fields(top, raw_input)
 
     note = (
-        "This is a **class project demo** on 10,000 public records — not a medical test. "
-        "Please do not use this as a diagnosis."
+        "**About this tool:** this is a **class project demo** built on 10,000 public records, "
+        "not a real diagnostic test. Testing in this project found the model's predictions were "
+        "barely better than a random guess, so please treat any score here as a talking point, "
+        "not a result — and speak to a doctor about any real health concerns."
     )
     return {
-        "headline": headline,
+        "tier": tier,
         "meaning": meaning,
         "why": why,
         "highlight_fields": highlight_fields,
@@ -1025,7 +1073,7 @@ def load_raw_data(path):
 
 
 @st.cache_resource(show_spinner=False)
-def train_knn_basic(X, y, _cache_tag=FEATURE_CACHE_TAG):
+def train_knn_basic(_X, _y, cache_tag=FEATURE_CACHE_TAG):
     def _compute(X, y):
         X_train, X_test, y_train, y_test = km.get_70_30_split(X, y)
         result = km.tune_and_evaluate(
@@ -1033,11 +1081,11 @@ def train_knn_basic(X, y, _cache_tag=FEATURE_CACHE_TAG):
             X_train, X_test, y_train, y_test, "1. Basic KNN",
         )
         return {"X_test": X_test, "y_test": y_test, "result": result}
-    return load_or_train("knn_basic", _compute, X, y)
+    return load_or_train("knn_basic", _compute, _X, _y)
 
 
 @st.cache_resource(show_spinner=False)
-def train_knn_smote(X, y, _cache_tag=FEATURE_CACHE_TAG):
+def train_knn_smote(_X, _y, cache_tag=FEATURE_CACHE_TAG):
     def _compute(X, y):
         X_train, X_test, y_train, y_test = km.get_70_30_split(X, y)
         result = km.tune_and_evaluate(
@@ -1045,11 +1093,11 @@ def train_knn_smote(X, y, _cache_tag=FEATURE_CACHE_TAG):
             X_train, X_test, y_train, y_test, "2. SMOTE KNN",
         )
         return {"X_test": X_test, "y_test": y_test, "result": result}
-    return load_or_train("knn_smote", _compute, X, y)
+    return load_or_train("knn_smote", _compute, _X, _y)
 
 
 @st.cache_resource(show_spinner=False)
-def train_dt_basic(X, y, _cache_tag=FEATURE_CACHE_TAG):
+def train_dt_basic(_X, _y, cache_tag=FEATURE_CACHE_TAG):
     def _compute(X, y):
         X_train, X_test, y_train, y_test = dtm.get_70_30_split(X, y)
         result = dtm.tune_and_evaluate(
@@ -1057,11 +1105,11 @@ def train_dt_basic(X, y, _cache_tag=FEATURE_CACHE_TAG):
             X_train, X_test, y_train, y_test, "1. Basic Decision Tree",
         )
         return {"X_test": X_test, "y_test": y_test, "result": result}
-    return load_or_train("dt_basic", _compute, X, y)
+    return load_or_train("dt_basic", _compute, _X, _y)
 
 
 @st.cache_resource(show_spinner=False)
-def train_dt_smote(X, y, _cache_tag=FEATURE_CACHE_TAG):
+def train_dt_smote(_X, _y, cache_tag=FEATURE_CACHE_TAG):
     def _compute(X, y):
         X_train, X_test, y_train, y_test = dtm.get_70_30_split(X, y)
         result = dtm.tune_and_evaluate(
@@ -1069,11 +1117,11 @@ def train_dt_smote(X, y, _cache_tag=FEATURE_CACHE_TAG):
             X_train, X_test, y_train, y_test, "2. SMOTE Decision Tree",
         )
         return {"X_test": X_test, "y_test": y_test, "result": result}
-    return load_or_train("dt_smote", _compute, X, y)
+    return load_or_train("dt_smote", _compute, _X, _y)
 
 
 @st.cache_resource(show_spinner=False)
-def train_lr_basic(X, y, _cache_tag=FEATURE_CACHE_TAG):
+def train_lr_basic(_X, _y, cache_tag=FEATURE_CACHE_TAG):
     def _compute(X, y):
         X_train, X_test, y_train, y_test = lgm.get_70_30_split(X, y)
         result = lgm.tune_and_evaluate(
@@ -1081,11 +1129,11 @@ def train_lr_basic(X, y, _cache_tag=FEATURE_CACHE_TAG):
             X_train, X_test, y_train, y_test, "1. Basic Logistic Regression",
         )
         return {"X_test": X_test, "y_test": y_test, "result": result}
-    return load_or_train("lr_basic", _compute, X, y)
+    return load_or_train("lr_basic", _compute, _X, _y)
 
 
 @st.cache_resource(show_spinner=False)
-def train_lr_smote(X, y, _cache_tag=FEATURE_CACHE_TAG):
+def train_lr_smote(_X, _y, cache_tag=FEATURE_CACHE_TAG):
     def _compute(X, y):
         X_train, X_test, y_train, y_test = lgm.get_70_30_split(X, y)
         result = lgm.tune_and_evaluate(
@@ -1093,11 +1141,11 @@ def train_lr_smote(X, y, _cache_tag=FEATURE_CACHE_TAG):
             X_train, X_test, y_train, y_test, "2. SMOTE Logistic Regression",
         )
         return {"X_test": X_test, "y_test": y_test, "result": result}
-    return load_or_train("lr_smote", _compute, X, y)
+    return load_or_train("lr_smote", _compute, _X, _y)
 
 
 @st.cache_resource(show_spinner=False)
-def train_rf_basic(X, y, _cache_tag=FEATURE_CACHE_TAG):
+def train_rf_basic(_X, _y, cache_tag=FEATURE_CACHE_TAG):
     def _compute(X, y):
         X_train, X_test, y_train, y_test = rfm.get_70_30_split(X, y)
         result = rfm.tune_and_evaluate(
@@ -1105,11 +1153,11 @@ def train_rf_basic(X, y, _cache_tag=FEATURE_CACHE_TAG):
             X_train, X_test, y_train, y_test, "1. Basic Random Forest",
         )
         return {"X_test": X_test, "y_test": y_test, "result": result}
-    return load_or_train("rf_basic", _compute, X, y)
+    return load_or_train("rf_basic", _compute, _X, _y)
 
 
 @st.cache_resource(show_spinner=False)
-def train_rf_smote(X, y, _cache_tag=FEATURE_CACHE_TAG):
+def train_rf_smote(_X, _y, cache_tag=FEATURE_CACHE_TAG):
     def _compute(X, y):
         X_train, X_test, y_train, y_test = rfm.get_70_30_split(X, y)
         result = rfm.tune_and_evaluate(
@@ -1117,7 +1165,7 @@ def train_rf_smote(X, y, _cache_tag=FEATURE_CACHE_TAG):
             X_train, X_test, y_train, y_test, "2. SMOTE Random Forest",
         )
         return {"X_test": X_test, "y_test": y_test, "result": result}
-    return load_or_train("rf_smote", _compute, X, y)
+    return load_or_train("rf_smote", _compute, _X, _y)
 
 def run_training_jobs(label, jobs):
     """Train each job with a single tidy progress bar instead of a long
@@ -1274,20 +1322,20 @@ def plot_selected_pipelines_roc_auc(basic_results, y_tests):
 
 
 @st.cache_resource(show_spinner=False)
-def get_feature_selection_result(X, y):
+def get_feature_selection_result(_X, _y):
     """ANOVA top-10 feature selection robustness check (report Section 5.6.5)."""
     return load_or_compute(
         "feature_selection_anova",
-        lambda: fscm.run_feature_selection_check(data={"X": X, "y": y}, save_outputs=False),
+        lambda: fscm.run_feature_selection_check(data={"X": _X, "y": _y}, save_outputs=False),
     )
 
 
 @st.cache_resource(show_spinner=False)
-def get_pca_result(X, y):
+def get_pca_result(_X, _y):
     """PCA dimensionality-reduction robustness check (report Section 5.6.6)."""
     return load_or_compute(
         "pca_robustness",
-        lambda: pcam.run_pca_check(data={"X": X, "y": y}, save_outputs=False),
+        lambda: pcam.run_pca_check(data={"X": _X, "y": _y}, save_outputs=False),
     )
 
 
@@ -1479,8 +1527,20 @@ if page in ("🏠 Home (Predict & Overview)", "📊 Model Comparison", "🔬 Rob
     all_results_df = best_df
 
 
+@st.cache_resource(show_spinner=False)
+def get_patient_cloud_fig(_raw_df, target_col):
+    # heart_3d.plot_patient_cloud_3d rebuilds a 1,600-point 3D scatter from
+    # scratch every call; it was previously invoked unmemoized directly in
+    # the render path, so it re-ran on every single widget interaction that
+    # triggers a Streamlit rerun (not just when the EDA page is first
+    # opened). Caching it here means it is only built once per (raw_df,
+    # target_col) pair.
+    return heart_3d.plot_patient_cloud_3d(_raw_df, target_col)
+
+
 @st.cache_resource(show_spinner="Prefetching EDA Plots (One-time setup)...")
-def prefetch_eda_plots(df, num_cols, cat_cols):
+def prefetch_eda_plots(_df, num_cols, cat_cols):
+    df = _df
     return {
         "class_dist": dv.plot_class_distribution(df),
         "num_dist": dv.plot_numeric_distributions(df, num_cols),
@@ -1495,7 +1555,8 @@ def prefetch_eda_plots(df, num_cols, cat_cols):
     }
 
 @st.cache_resource(show_spinner="Prefetching Data Stats...")
-def prefetch_stats(df, num_cols, cat_cols, X_df, y_ser):
+def prefetch_stats(_df, num_cols, cat_cols, _X_df, _y_ser):
+    df, X_df, y_ser = _df, _X_df, _y_ser
     outlier_df = dv.compute_outlier_counts(df, num_cols)
     table_numeric, table_categorical, fig_assoc = dv.test_target_associations(df, num_cols, cat_cols)
     mcar_df, fig_mcar = dv.test_alcohol_missingness_mcar(df, num_cols, cat_cols)
@@ -1945,31 +2006,15 @@ if page == "🏠 Home (Predict & Overview)":
         with right:
             with st.container(key="live_stage"):
                 st.caption("💓 3D / Animated HEART")
+                last_tier = verdict_tier(last_risk) if last_risk is not None else None
                 heart_3d.render_beating_heart(
                     risk_pct=last_risk,
                     label=last_label,
+                    tier=last_tier["css"] if last_tier else None,
                     bpm=_estimated_bpm(),
                     key="home_heart_3d",
                     height=520,
                 )
-                pct_key = "heart_risk_pct_bad" if last_label == "Yes" else "heart_risk_pct"
-                with st.container(key=pct_key):
-                    if last_label == "Yes":
-                        st.metric(
-                            "Heart · Bad",
-                            f"{last_risk:.0f}% risk" if last_risk is not None else "—",
-                        )
-                        st.caption("At risk of heart disease.")
-                    elif last_label == "No":
-                        st.metric(
-                            "Heart · No",
-                            f"{last_risk:.0f}% risk" if last_risk is not None else "—",
-                        )
-                        st.caption("No heart disease.")
-                    else:
-                        st.metric("Heart risk", "Waiting")
-                        st.caption("Calculate risk to see Heart · No or Heart · Bad here.")
-
                 with st.container(key="cta_row", horizontal=True, gap="small"):
                     analyze = st.button(
                         "Calculate Risk",
@@ -1991,20 +2036,17 @@ if page == "🏠 Home (Predict & Overview)":
                     with st.container(key="assess_ready"):
                         st.markdown("🫀 **Assessment Ready**")
                         st.caption("Fill the vitals, then press Calculate Risk.")
-                elif live["label"] == "Yes":
-                    with st.container(key="assess_high"):
-                        st.markdown("🔴 **HIGHER RISK**")
-                        st.markdown(
-                            f"**Prediction:** Yes  \n"
-                            f"**Model:** {live['model_choice']}"
-                        )
                 else:
-                    with st.container(key="assess_low"):
-                        st.markdown("🟢 **LOWER RISK**")
-                        st.markdown(
-                            f"**Prediction:** No  \n"
-                            f"**Model:** {live['model_choice']}"
-                        )
+                    # Just a compact pointer here — the full result renders at
+                    # full page width directly below the form (see below),
+                    # instead of being squeezed into this half-width column,
+                    # which left it tall and cramped while the left column
+                    # went blank underneath.
+                    tier = verdict_tier(live["prob_disease"] * 100)
+                    with st.container(key=f"assess_{tier['css']}"):
+                        st.markdown(f"{tier['icon']} **{tier['word']} — scored {live['prob_disease'] * 100:.0f}/100**")
+                        st.caption("Full result and reasons are just below ↓")
+
 
                 st.markdown("**Health Indicators**")
                 bp_now = st.session_state.get("pred_num_Blood Pressure", bp_val)
@@ -2064,37 +2106,58 @@ if page == "🏠 Home (Predict & Overview)":
         st.rerun()
 
     if live:
-        st.subheader("Prediction Result")
-        risk_gauge.render_total_risk_gauge(live["prob_disease"] * 100, live["label"])
+        # Full page width here — not squeezed into the half-width right
+        # column — but still directly below the form, not pushed down past
+        # Health Indicators, Visit History, and Explore Further.
+        pct = live["prob_disease"] * 100
         reason = live["reason"]
         evidence_df = live["evidence_df"]
-        n_similar = live["n_similar"]
         n_rows = live["n_rows"]
-        if "not sure" in reason["headline"]:
-            panel_key = "explain_panel_unsure"
-        elif live["label"] == "Yes":
-            panel_key = "explain_panel_bad"
-        else:
-            panel_key = "explain_panel_ok"
+        tier = verdict_tier(pct)
+        panel_key = f"explain_panel_{tier['css']}"
+
+        st.subheader("Prediction Result")
+        gauge_left, gauge_mid, gauge_right = st.columns([1, 2, 1])
+        with gauge_mid:
+            risk_gauge.render_total_risk_gauge(pct, live["label"], tier=tier["css"])
+
         with st.container(border=True, key=panel_key):
-            st.markdown("**What this means**")
-            st.markdown(reason["headline"])
+            st.markdown(f"### {tier['icon']} {tier['word']} — scored {pct:.0f}/100")
             st.caption(reason["meaning"])
-            st.markdown("**Why the model said that**")
-            st.markdown(reason["why"])
-            st.markdown("**Evidence from your answers**")
-            st.caption(
-                "Each row is one question from the form. "
-                "Compare **your answer** with typical people in our records who did / did not have heart disease."
+
+            st.warning(
+                "**How much to trust this:** testing across this whole project found the model "
+                "barely beats a random guess at telling Yes from No. Treat this score as a "
+                "talking point, not an answer.",
+                icon="⚠️",
             )
-            st.dataframe(evidence_df, width="stretch", hide_index=True)
-            if n_rows and n_similar >= max(3, n_rows // 2):
+
+            st.divider()
+
+            col_bullets, col_table = st.columns([1, 1.3], gap="large")
+            with col_bullets:
+                st.markdown("**What pushed this score**")
+                bullets = _reason_bullets(evidence_df)
+                if bullets:
+                    for b in bullets:
+                        st.markdown(f"- {b}")
+                else:
+                    st.markdown(
+                        "- None of your top answers looked very different from either group in "
+                        "our records — that's a big part of *why* the model can't tell the two apart."
+                    )
+                st.caption(reason["why"])
+            with col_table:
+                st.markdown(f"**All {n_rows} answers compared to typical patients**")
                 st.caption(
-                    "Many of these answers look **almost the same** in both groups. "
-                    "That is a finding from our project: these questions do not clearly tell Yes from No, "
-                    "so a very low or high percentage is still not a medical all-clear."
+                    "Each row is one question from the form. "
+                    "Compare **your answer** with typical people in our records who did / did not have heart disease."
                 )
+                st.dataframe(evidence_df, width="stretch", hide_index=True, height=280)
+
+            st.divider()
             st.caption(reason["note"])
+
             pdf_bytes = build_assessment_pdf(live, st.session_state.get("risk_history") or [])
             st.download_button(
                 "Export Assessment",
@@ -2282,7 +2345,7 @@ elif page == "🔍 EDA":
                 "if the two colors formed separate clusters, a classifier would have an easy job. "
                 "Here they occupy almost the same space."
             )
-            st.plotly_chart(heart_3d.plot_patient_cloud_3d(raw_df, dp.TARGET_COL), width="stretch")
+            st.plotly_chart(get_patient_cloud_fig(raw_df, dp.TARGET_COL), width="stretch")
 
         with st.container(border=True):
             st.markdown("**Numeric features split by target**")

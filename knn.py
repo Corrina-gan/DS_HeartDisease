@@ -21,6 +21,7 @@ TEST_SIZE = 0.30
 
 KNN_SCORING = "f1"
 
+# For GridSearchCV for different configurations - 6 combinations for each Basic and Smote 
 BASIC_PARAM_GRID = {
     "knn__n_neighbors": [5, 9, 15],
     "knn__metric": ["euclidean", "manhattan"],
@@ -31,7 +32,7 @@ SMOTE_PARAM_GRID = {
 }
 
 sns.set_style("whitegrid")
-plt.rcParams["figure.figsize"] = (7, 5)
+plt.rcParams["figure.figsize"] = (7, 5) #Graph size 
 
 
 # --------------------------------------------------------------------------
@@ -42,7 +43,7 @@ def get_70_30_split(X, y, random_state=RANDOM_STATE):
     return train_test_split(
         X, y, test_size=TEST_SIZE, random_state=random_state, stratify=y
     )
-
+# Stratify=y ensures that the proportion of classes in the train and test sets is the approximate same like 80/20 in dataset
 
 # --------------------------------------------------------------------------
 # Pipelines
@@ -67,14 +68,15 @@ def build_smote_pipeline():
 # Tune + evaluate
 # --------------------------------------------------------------------------
 
+# Find the best configuration
 def tune_and_evaluate(pipeline, param_grid, X_train, X_test, y_train, y_test, model_name, cv=5, scoring=KNN_SCORING):
     grid = GridSearchCV(
         pipeline,
         param_grid,
-        cv=cv,
+        cv=cv, # 5-fold cross-validation
         scoring=scoring,
-        n_jobs=-1,
-        verbose=1,
+        n_jobs=-1, # use all available cores to speed up the process
+        verbose=1, # show progress
     )
 
     grid.fit(X_train, y_train)
@@ -110,32 +112,37 @@ def tune_and_evaluate(pipeline, param_grid, X_train, X_test, y_train, y_test, mo
 # --------------------------------------------------------------------------
 # Visualizations
 # --------------------------------------------------------------------------
+# Importance features determined 
 def get_permutation_importance(model, X_test, y_test):
-    """Calculates permutation importance for models without native feature weights."""
+    # Randomly shuffle each feature and see how much the model performance decreases
+    # The higher the decrease, the more important the feature
     result = permutation_importance(model, X_test, y_test, n_repeats=5, random_state=RANDOM_STATE, n_jobs=-1)
     
+    # Create a dataframe to store the results
     imp_df = pd.DataFrame({
         "Feature": X_test.columns,
         "Importance": result.importances_mean,
         "Std_Dev": result.importances_std
     })
     
+    # Sort the dataframe by importance
     imp_df = imp_df.sort_values(by="Importance", ascending=False).reset_index(drop=True)
     imp_df.index += 1
     imp_df.index.name = "Rank"
     
     return imp_df.reset_index()
 
+# Plot
 def plot_permutation_importance(imp_df, title):
     fig, ax = plt.subplots(figsize=(8, 6))
-    top_df = imp_df.head(15)
+    top_df = imp_df.head(15) # Top 15 features
     
     sns.barplot(
         x="Importance", 
         y="Feature", 
         data=top_df, 
-        palette="viridis", 
-        ax=ax
+        palette="viridis", # Color scheme
+        ax=ax # Plot on the axes
     )
     
     ax.set_title(title, fontweight='bold')
