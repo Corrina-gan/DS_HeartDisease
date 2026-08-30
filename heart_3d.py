@@ -49,6 +49,7 @@ _HEART_CSS = """
 }
 .stage.yes { --glow: rgba(225, 29, 72, 0.38); }
 .stage.no { --glow: rgba(10, 92, 86, 0.36); }
+.stage.unsure { --glow: rgba(202, 138, 4, 0.34); }
 canvas { display: block; width: 100%; height: 100%; cursor: grab; }
 canvas:active { cursor: grabbing; }
 .hint {
@@ -191,12 +192,18 @@ export default function (component) {
   parentElement.__heartBooting = true;
 
   function applyStatus(next) {
+    // Prefer the tier computed once in Python from the score (ok / unsure /
+    // bad, the same verdict_tier() used for the gauge and the sidebar
+    // badge) so this heart never disagrees with them. Falls back to the
+    // raw Yes/No label only if no tier was supplied.
+    const tier = next && next.tier ? String(next.tier) : "";
     const label = next && next.label ? String(next.label) : "";
-    stage.classList.toggle("yes", label === "Yes");
-    stage.classList.toggle("no", label === "No");
-    if (label === "Yes") return "yes";
-    if (label === "No") return "no";
-    return "idle";
+    const kind = tier === "bad" ? "yes" : tier === "unsure" ? "unsure" : tier === "ok" ? "no"
+      : label === "Yes" ? "yes" : label === "No" ? "no" : "idle";
+    stage.classList.toggle("yes", kind === "yes");
+    stage.classList.toggle("no", kind === "no");
+    stage.classList.toggle("unsure", kind === "unsure");
+    return kind;
   }
 
   const HOTSPOTS = [
@@ -654,12 +661,18 @@ _heart_component = st.components.v2.component(
 )
 
 
-def render_beating_heart(risk_pct=None, label=None, caption=None, bpm=72, key="beating_heart", height=520):
-    """Mount the interactive anatomical heart. `label` is Yes/No after a prediction."""
+def render_beating_heart(risk_pct=None, label=None, tier=None, caption=None, bpm=72, key="beating_heart", height=520):
+    """Mount the interactive anatomical heart.
+
+    `label` is Yes/No after a prediction; `tier` ("ok"/"unsure"/"bad", from
+    the shared `verdict_tier()` in app.py) decides the glow color so this
+    view can't disagree with the gauge or the explanation panel.
+    """
     return _heart_component(
         data={
             "risk_pct": risk_pct,
             "label": label,
+            "tier": tier,
             "caption": caption,
             "bpm": bpm,
             "model_url": _heart_model_url(),

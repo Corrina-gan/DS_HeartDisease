@@ -33,17 +33,11 @@ def _needle_poly(cx, cy, deg, inner, outer, half_w=8.5):
     )
 
 
-def _build_gauge_svg(risk_pct):
+def _build_gauge_svg(risk_pct, tier="ok"):
     pct = max(0.0, min(100.0, float(risk_pct)))
     shown = int(round(pct))
     pointer = "#0f766e"
-
-    if pct < 30:
-        tip = "#0f766e"
-    elif pct >= 70:
-        tip = "#be123c"
-    else:
-        tip = "#ca8a04"
+    tip = {"ok": "#0f766e", "unsure": "#ca8a04", "bad": "#be123c"}.get(tier, "#ca8a04")
 
     cx, cy, radius, stroke = 220, 168, 118, 30
     needle = 180.0 - pct * 1.8
@@ -120,6 +114,7 @@ _GAUGE_CSS = """
 .rg-status.on { display: inline-block; }
 .rg-status.ok { background: #e5f6f1; color: #0f766e; border: 1px solid #9fd6c9; }
 .rg-status.bad { background: #fde8ea; color: #be123c; border: 1px solid #f3b4b8; }
+.rg-status.unsure { background: #fef3c7; color: #b45309; border: 1px solid #fde68a; }
 .rg-svg { width: min(520px, 100%); height: auto; display: block; margin: 0 auto 8px; }
 .rg-bar {
   width: min(360px, 72%);
@@ -207,19 +202,18 @@ export default function (component) {
   if (pctEl) {
     pctEl.textContent = shown + "%";
     pctEl.style.left = left + "%";
-    pctEl.style.color = shown >= 70 ? "#be123c" : shown >= 30 ? "#ca8a04" : "#15803d";
+    pctEl.style.color = shown > 60 ? "#be123c" : shown < 40 ? "#15803d" : "#ca8a04";
   }
 
-  const label = data && data.label ? String(data.label) : "";
-  if (status) {
-    status.className = "rg-status";
-    if (label === "Yes") {
-      status.textContent = "Heart · Bad";
-      status.classList.add("on", "bad");
-    } else if (label === "No") {
-      status.textContent = "Heart · No";
-      status.classList.add("on", "ok");
-    }
+  // The tier (ok / unsure / bad) is decided once, in Python, from the same
+  // thresholds used everywhere else on the page — this component just
+  // displays it, instead of re-deriving its own Yes/No-based verdict that
+  // could disagree with the rest of the screen.
+  const tier = data && data.tier ? String(data.tier) : "";
+  const tierText = {ok: "Heart · Unlikely", bad: "Heart · More likely", unsure: "Heart · Unclear"};
+  if (status && tierText[tier]) {
+    status.className = "rg-status on " + tier;
+    status.textContent = tierText[tier];
   }
 }
 """
@@ -232,13 +226,20 @@ _gauge_component = st.components.v2.component(
 )
 
 
-def render_total_risk_gauge(risk_pct, pred_label=None, key="total_risk_gauge"):
-    """Mount the Total Risk Level gauge. `pred_label` is Yes/No."""
+def render_total_risk_gauge(risk_pct, pred_label=None, tier="ok", key="total_risk_gauge"):
+    """Mount the Total Risk Level gauge.
+
+    `tier` is "ok" / "unsure" / "bad" from the shared `verdict_tier()` in
+    app.py — pass it through rather than letting this component guess its
+    own color from `pred_label` alone, so the gauge never shows a different
+    verdict than the panel underneath it.
+    """
     return _gauge_component(
         data={
             "risk_pct": float(risk_pct),
             "label": pred_label,
-            "svg": _build_gauge_svg(risk_pct),
+            "tier": tier,
+            "svg": _build_gauge_svg(risk_pct, tier),
         },
         key=key,
         width="stretch",
