@@ -13,9 +13,13 @@ prediction — this negative result, and why it holds up under multiple
 robustness checks, is the main analytical contribution of the report.
 
 ## Live demo
+🔗 **Streamlit app:** [(link)](https://dsheartdisease-f3kby9lrp3rughxm9xgufo.streamlit.app/)
 
-🔗 **Streamlit app:** (link)
+You can also run the prototype locally — see below.
 
+> **Note:** the very first load after a long idle period may be briefly
+> slower while Streamlit Cloud's free-tier container spins up. Once
+> running, the app loads quickly — trained models are cached and reused.
 You can also run the prototype locally — see below.
 
 ## Repository contents
@@ -37,7 +41,10 @@ You can also run the prototype locally — see below.
 | `risk_gauge.py` | Risk gauge visualization component used by the app |
 | `heart_disease.csv` | Dataset |
 | `requirements.txt` | Python dependencies |
-
+> If `heart_disease.csv` isn't present in this repo for any reason, you can
+> download it from Kaggle:
+> [Heart Disease dataset](https://www.kaggle.com/datasets/oktayrdeki/heart-disease).
+> Place it in the same folder as `app.py` before running.
 ## Setup
 
 ```bash
