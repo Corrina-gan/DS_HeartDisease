@@ -458,11 +458,28 @@ st.html(
     .st-key-heart_risk_pct_bad,
     .st-key-heart_risk_pct_unsure {
         background: #ffffff !important;
-        border: 1px solid #d5e3e0 !important;
-        border-radius: 14px !important;
-        padding: 0.7rem 0.9rem 0.8rem !important;
-        margin-top: 0.35rem !important;
-        box-shadow: 0 6px 16px rgba(22, 35, 43, 0.06) !important;
+        border: 1px solid #d5dbe3 !important;
+        outline: none !important;
+        border-radius: 16px !important;
+        padding: 0.7rem 0.8rem 0.55rem !important;
+        margin: 0.45rem 0 0.1rem 0 !important;
+        box-shadow: 0 8px 20px rgba(22, 35, 43, 0.08) !important;
+    }
+    .st-key-heart_risk_pct [data-testid="stMetric"],
+    .st-key-heart_risk_pct_bad [data-testid="stMetric"],
+    .st-key-heart_risk_pct_unsure [data-testid="stMetric"] {
+        background: #ffffff !important;
+        border: 1px solid #d5dbe3 !important;
+        border-radius: 10px !important;
+        box-shadow: none !important;
+        padding: 0.55rem 0.75rem 0.6rem !important;
+        backdrop-filter: none !important;
+        transform: none !important;
+    }
+    .st-key-heart_risk_pct [data-testid="stMetric"]:hover,
+    .st-key-heart_risk_pct_bad [data-testid="stMetric"]:hover,
+    .st-key-heart_risk_pct_unsure [data-testid="stMetric"]:hover {
+        transform: none !important;
     }
     .st-key-heart_risk_pct [data-testid="stMetricValue"],
     .st-key-heart_risk_pct_bad [data-testid="stMetricValue"],
@@ -480,7 +497,23 @@ st.html(
         font-weight: 700 !important;
         letter-spacing: 0.08em;
         text-transform: uppercase;
-        color: #475569 !important;
+        color: #64748b !important;
+    }
+    .st-key-heart_risk_pct [data-testid="stCaptionContainer"],
+    .st-key-heart_risk_pct_bad [data-testid="stCaptionContainer"],
+    .st-key-heart_risk_pct_unsure [data-testid="stCaptionContainer"] {
+        margin-top: 0.4rem !important;
+        padding: 0 0.15rem 0.2rem !important;
+    }
+    .st-key-heart_risk_pct [data-testid="stCaptionContainer"] p,
+    .st-key-heart_risk_pct_bad [data-testid="stCaptionContainer"] p,
+    .st-key-heart_risk_pct_unsure [data-testid="stCaptionContainer"] p {
+        color: #334155 !important;
+        opacity: 1 !important;
+        font-size: 0.88rem !important;
+        font-weight: 500 !important;
+        line-height: 1.4 !important;
+        filter: none !important;
     }
     .st-key-assess_ready,
     .st-key-assess_bad,
@@ -2015,6 +2048,15 @@ if page == "🏠 Home (Predict & Overview)":
                     key="home_heart_3d",
                     height=520,
                 )
+                if last_label == "Yes":
+                    risk_key, risk_value = "heart_risk_pct_bad", "Heart Disease · Yes"
+                elif last_label == "No":
+                    risk_key, risk_value = "heart_risk_pct", "Heart Disease · No"
+                else:
+                    risk_key, risk_value = "heart_risk_pct", "Waiting"
+                with st.container(key=risk_key):
+                    st.metric("HEART RISK", risk_value, border=True)
+                    st.caption("Calculate to see if there is a risk of heart disease or no")
                 with st.container(key="cta_row", horizontal=True, gap="small"):
                     analyze = st.button(
                         "Calculate Risk",
@@ -2035,7 +2077,6 @@ if page == "🏠 Home (Predict & Overview)":
                 if not live:
                     with st.container(key="assess_ready"):
                         st.markdown("🫀 **Assessment Ready**")
-                        st.caption("Fill the vitals, then press Calculate Risk.")
                 else:
                     # Just a compact pointer here — the full result renders at
                     # full page width directly below the form (see below),
@@ -2700,7 +2741,9 @@ elif page == "⚖️ Basic vs SMOTE":
     )
 
     with st.container(key="smote_model_tabs"):
-        model_tabs = st.tabs(["K-Nearest Neighbors (KNN)", "Logistic Regression", "Random Forest", "Decision Tree"])
+        tab_lr, tab_dt, tab_rf, tab_knn = st.tabs([
+            "Logistic Regression", "Decision Tree", "Random Forest", "KNN",
+        ])
 
     all_trained = train_all_models(X, y)
 
@@ -2733,7 +2776,7 @@ elif page == "⚖️ Basic vs SMOTE":
     dt_results_df = pd.DataFrame([r["metrics"] for r in dt_results.values()])
 
 
-    with model_tabs[0]:
+    with tab_knn:
         st.header("K-Nearest Neighbors (KNN)")
 
         st.subheader("📊 High-Level Metrics Impact : SMOTE vs. Basic")
@@ -2813,7 +2856,7 @@ elif page == "⚖️ Basic vs SMOTE":
                 )
 
 
-    with model_tabs[1]:
+    with tab_lr:
         st.header("Logistic Regression")
 
         lr_basic_row = results_df_lr.iloc[0]
@@ -2899,7 +2942,7 @@ elif page == "⚖️ Basic vs SMOTE":
                 )
 
 
-    with model_tabs[2]:
+    with tab_rf:
         st.header("Random Forest")
 
         rf_basic = rf_results_df.iloc[0]
@@ -2980,7 +3023,7 @@ elif page == "⚖️ Basic vs SMOTE":
                 )
 
 
-    with model_tabs[3]:
+    with tab_dt:
         st.header("Decision Tree")
 
         dt_basic = dt_results_df.iloc[0]
